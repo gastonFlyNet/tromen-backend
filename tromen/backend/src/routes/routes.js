@@ -167,4 +167,45 @@ export default async function routeRoutes(app) {
     `
     return updated
   })
+  // POST /api/routes/:id/stops — agregar paradas a ruta existente (admin/supervisor)
+app.post('/:id/stops', {
+  preHandler: [requireRole('admin', 'supervisor')],
+}, async (request, reply) => {
+  const { id } = request.params
+  const { stops = [] } = request.body
+
+  const [route] = await sql`SELECT * FROM routes WHERE id = ${id}`
+  if (!route) return reply.status(404).send({ error: 'Ruta no encontrada' })
+  if (stops.length === 0) return reply.status(400).send({ error: 'No hay paradas para agregar' })
+
+  // Obtener el máximo stop_order actual
+  const [maxOrder] = await sql`
+    SELECT COALESCE(MAX(stop_order), 0) AS max_order
+    FROM deliveries WHERE route_id = ${id}
+  `
+  const baseOrder = maxOrder.max_order
+
+  const deliveryRows = stops.map((s, i) => ({
+    route_id:        id,
+    client_id:       s.client_id,
+    stop_order:      s.stop_order ?? baseOrder + i + 1,
+    expected_amount: s.expected_amount ?? 0,
+    notes:           s.notes ?? null,
+  }))
+
+  await sql`INSERT INTO deliveries ${sql(deliveryRows)}`
+
+  // Actualizar totales de la ruta
+  await sql`
+    UPDATE routes SET
+      total_stops  = (SELECT COUNT(*) FROM deliveries WHERE route_id = ${id}),
+      total_amount = (SELECT COALESCE(SUM(expected_amount), 0) FROM deliveries WHERE route_id = ${id})
+    WHERE id = ${id}
+  `
+
+  return reply.status(201).send({
+    message: `${stops.length} parada${stops.length > 1 ? 's' : ''} agregada${stops.length > 1 ? 's' : ''} correctamente`,
+    stops_added: stops.length,
+  })
+})
 }
