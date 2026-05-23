@@ -11,6 +11,7 @@ import routeRoutes from './routes/routes.js'
 import deliveryRoutes from './routes/deliveries.js'
 import gpsRoutes from './routes/gps.js'
 import dashboardRoutes from './routes/dashboard.js'
+import productRoutes from './routes/products.js'
 
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development'
@@ -22,6 +23,7 @@ const app = Fastify({
 await app.register(cors, {
   origin: process.env.CORS_ORIGIN?.split(',') ?? true,
   credentials: true,
+  app.register(productRoutes, { prefix: '/api/products' })
 })
 
 await app.register(jwt, {
