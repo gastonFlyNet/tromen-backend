@@ -14,6 +14,7 @@ import dashboardRoutes from './routes/dashboard.js'
 import productRoutes from './routes/products.js'
 
 const app = Fastify({
+  bodyLimit: 50 * 1024 * 1024, // 50 MB
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
     : true
