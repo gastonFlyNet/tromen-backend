@@ -19,13 +19,10 @@ const app = Fastify({
     : true
 })
 
-// ── Plugins ──────────────────────────────────────────────────
 await app.register(cors, {
   origin: process.env.CORS_ORIGIN?.split(',') ?? true,
   credentials: true,
-  app.register(productRoutes, { prefix: '/api/products' })
 })
-
 await app.register(jwt, {
   secret: process.env.JWT_SECRET,
 })
@@ -66,6 +63,7 @@ app.register(routeRoutes,    { prefix: '/api/routes' })
 app.register(deliveryRoutes, { prefix: '/api/deliveries' })
 app.register(gpsRoutes,      { prefix: '/api/gps' })
 app.register(dashboardRoutes,{ prefix: '/api/dashboard' })
+app.register(productRoutes,  { prefix: '/api/products' })
 
 // ── Error handler global ──────────────────────────────────────
 app.setErrorHandler((error, request, reply) => {
