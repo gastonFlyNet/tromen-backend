@@ -141,4 +141,20 @@ export default async function gpsRoutes(app) {
       ORDER BY recorded_at ASC
     `
   })
+  // GET /api/gps/geofence-alerts — alertas de salida de zona recientes
+app.get('/geofence-alerts', {
+  preHandler: [requireRole('admin', 'supervisor')]
+}, async () => {
+  return sql`
+    SELECT ge.id, ge.event_type, ge.latitude, ge.longitude, ge.occurred_at,
+           u.name AS repartidor, r.id AS route_id
+    FROM geofence_events ge
+    JOIN users u ON u.id = ge.user_id
+    LEFT JOIN routes r ON r.id = ge.route_id
+    WHERE ge.event_type = 'salida'
+      AND ge.occurred_at >= NOW() - INTERVAL '2 hours'
+    ORDER BY ge.occurred_at DESC
+    LIMIT 20
+  `
+})
 }
