@@ -21,7 +21,7 @@ export default async function geofenceRoutes(app) {
   app.patch('/:id', { preHandler: [requireRole('admin', 'supervisor')] }, async (request, reply) => {
     const { id } = request.params
     const { name, description, type, polygon_coords, center_lat, center_lon, radius_meters, active } = request.body
-    const updates: any = {}
+     const updates = {}
     if (name !== undefined)          updates.name = name
     if (description !== undefined)   updates.description = description
     if (type !== undefined)          updates.type = type
