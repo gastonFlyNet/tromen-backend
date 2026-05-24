@@ -208,4 +208,14 @@ app.post('/:id/stops', {
     stops_added: stops.length,
   })
 })
+// GET /api/users/supervisors — lista de supervisores para autorizar pausas
+app.get('/supervisors', {
+  preHandler: [app.authenticate]
+}, async () => {
+  return sql`
+    SELECT id, name, role FROM users
+    WHERE role IN ('admin', 'supervisor') AND active = true
+    ORDER BY name ASC
+  `
+})
 }
