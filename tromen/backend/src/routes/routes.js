@@ -24,6 +24,39 @@ export default async function routeRoutes(app) {
       ORDER BY r.route_date DESC, r.created_at DESC
       LIMIT 100
     `
+    // POST /api/routes/:id/pause — pausar ruta
+app.post('/:id/pause', {
+  preHandler: [app.authenticate]
+}, async (request, reply) => {
+  const { id } = request.params
+  const { authorized_by, reason } = request.body
+  if (!authorized_by) return reply.status(400).send({ error: 'authorized_by es requerido' })
+  const [route] = await sql`SELECT * FROM routes WHERE id = ${id}`
+  if (!route) return reply.status(404).send({ error: 'Ruta no encontrada' })
+  if (route.status !== 'en_curso') return reply.status(400).send({ error: 'La ruta no está en curso' })
+  await sql`UPDATE routes SET status = 'pausada' WHERE id = ${id}`
+  const [pause] = await sql`
+    INSERT INTO route_pauses (route_id, authorized_by, reason)
+    VALUES (${id}, ${authorized_by}, ${reason ?? null})
+    RETURNING *
+  `
+  return reply.status(201).send(pause)
+})
+
+// POST /api/routes/:id/resume — reanudar ruta
+app.post('/:id/resume', {
+  preHandler: [app.authenticate]
+}, async (request, reply) => {
+  const { id } = request.params
+  const [route] = await sql`SELECT * FROM routes WHERE id = ${id}`
+  if (!route) return reply.status(404).send({ error: 'Ruta no encontrada' })
+  await sql`UPDATE routes SET status = 'en_curso' WHERE id = ${id}`
+  await sql`
+    UPDATE route_pauses SET resumed_at = NOW()
+    WHERE route_id = ${id} AND resumed_at IS NULL
+  `
+  return { success: true }
+})
   })
 
   // GET /api/routes/today — ruta del día del repartidor logueado
