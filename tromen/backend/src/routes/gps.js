@@ -36,6 +36,31 @@ export default async function gpsRoutes(app) {
          ${device_id ?? null}, ${battery_pct ?? null})
       RETURNING id, recorded_at
     `
+    // Verificar geocerca de Catriel
+    const [geofence] = await sql`
+      SELECT id, center_lat, center_lon, radius_meters
+      FROM geofences
+      WHERE name = 'Perimetro Catriel' AND active = true
+      LIMIT 1
+    `
+    if (geofence) {
+      const R = 6371000
+      const dLat = (latitude - geofence.center_lat) * Math.PI / 180
+      const dLon = (longitude - geofence.center_lon) * Math.PI / 180
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(geofence.center_lat * Math.PI / 180) *
+        Math.cos(latitude * Math.PI / 180) *
+        Math.sin(dLon/2) * Math.sin(dLon/2)
+      const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+      if (distance > geofence.radius_meters) {
+        await sql`
+          INSERT INTO geofence_events (geofence_id, user_id, route_id, event_type, latitude, longitude)
+          VALUES (${geofence.id}, ${request.user.id}, ${route_id ?? null}, 'salida', ${latitude}, ${longitude})
+        `
+      }
+    }
+
+    return reply.status(201).send(event)
     return reply.status(201).send(event)
   })
 
