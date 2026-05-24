@@ -13,7 +13,7 @@ import gpsRoutes from './routes/gps.js'
 import dashboardRoutes from './routes/dashboard.js'
 import productRoutes from './routes/products.js'
 import geofenceRoutes from './routes/geofences.js'
-import geofenceRoutes from './routes/geofences.js'
+
 
 const app = Fastify({
   bodyLimit: 50 * 1024 * 1024, // 50 MB
