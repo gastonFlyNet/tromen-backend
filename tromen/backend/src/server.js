@@ -12,6 +12,8 @@ import deliveryRoutes from './routes/deliveries.js'
 import gpsRoutes from './routes/gps.js'
 import dashboardRoutes from './routes/dashboard.js'
 import productRoutes from './routes/products.js'
+import geofenceRoutes from './routes/geofences.js'
+import geofenceRoutes from './routes/geofences.js'
 
 const app = Fastify({
   bodyLimit: 50 * 1024 * 1024, // 50 MB
@@ -65,7 +67,7 @@ app.register(deliveryRoutes, { prefix: '/api/deliveries' })
 app.register(gpsRoutes,      { prefix: '/api/gps' })
 app.register(dashboardRoutes,{ prefix: '/api/dashboard' })
 app.register(productRoutes,  { prefix: '/api/products' })
-
+app.register(geofenceRoutes, { prefix: '/api/geofences' })
 // ── Error handler global ──────────────────────────────────────
 app.setErrorHandler((error, request, reply) => {
   app.log.error(error)
