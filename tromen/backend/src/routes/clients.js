@@ -96,4 +96,26 @@ export default async function clientRoutes(app) {
   }, async () => {
     return sql`SELECT * FROM v_client_balances ORDER BY current_balance DESC`
   })
+  // GET /api/clients/:id/deliveries — historial de entregas de un cliente
+app.get('/:id/deliveries', {
+  preHandler: [app.authenticate]
+}, async (request) => {
+  const { id } = request.params
+  const deliveries = await sql`
+    SELECT d.*, r.route_date, u.name AS repartidor,
+           COALESCE(
+             json_agg(
+               json_build_object('id', e.id, 'type', e.type, 'file_url', e.file_url, 'created_at', e.created_at)
+             ) FILTER (WHERE e.id IS NOT NULL), '[]'
+           ) AS evidence
+    FROM deliveries d
+    JOIN routes r ON r.id = d.route_id
+    JOIN users u ON u.id = r.user_id
+    LEFT JOIN delivery_evidence e ON e.delivery_id = d.id
+    WHERE d.client_id = ${id}
+    GROUP BY d.id, r.route_date, u.name
+    ORDER BY r.route_date DESC, d.created_at DESC
+  `
+  return deliveries
+})
 }
