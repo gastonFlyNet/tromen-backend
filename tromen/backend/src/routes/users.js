@@ -46,7 +46,7 @@ export default async function userRoutes(app) {
       return reply.status(403).send({ error: 'Sin permisos' })
     }
     const [user] = await sql`
-      SELECT id, name, email, phone, role, active, avatar_url, last_login_at, created_at
+      SELECT id, name, email, phone, role, active, avatar_url, vehicle_plate, notes, last_login_at, created_at
       FROM users WHERE id = ${id}
     `
     if (!user) return reply.status(404).send({ error: 'Usuario no encontrado' })
@@ -93,13 +93,15 @@ export default async function userRoutes(app) {
     if (request.user.id !== id && !isAdmin) {
       return reply.status(403).send({ error: 'Sin permisos' })
     }
-    const { name, phone, avatar_url, active, role } = request.body
+    const { name, phone, avatar_url, active, role, vehicle_plate, notes } = request.body
     const updates = {}
-    if (name)       updates.name = name
-    if (phone)      updates.phone = phone
-    if (avatar_url) updates.avatar_url = avatar_url
+    if (name)                          updates.name = name
+    if (phone !== undefined)           updates.phone = phone
+    if (avatar_url)                    updates.avatar_url = avatar_url
+    if (vehicle_plate !== undefined)   updates.vehicle_plate = vehicle_plate
+    if (notes !== undefined)           updates.notes = notes
     if (isAdmin && active !== undefined) updates.active = active
-    if (isAdmin && role) updates.role = role
+    if (isAdmin && role)               updates.role = role
     if (Object.keys(updates).length === 0) {
       return reply.status(400).send({ error: 'Nada para actualizar' })
     }
@@ -108,5 +110,30 @@ export default async function userRoutes(app) {
       RETURNING id, name, email, phone, role, active
     `
     return user
+  })
+  // GET /api/users/:id/routes-history
+  app.get('/:id/routes-history', {
+    preHandler: [requireRole('admin', 'supervisor')]
+  }, async (request, reply) => {
+    const { id } = request.params
+    const limit = parseInt(request.query.limit) || 30
+
+    const routes = await sql`
+      SELECT r.id, r.route_date AS date, r.status, r.created_at,
+        json_agg(
+          json_build_object(
+            'id', d.id,
+            'status', d.status,
+            'client_id', d.client_id
+          )
+        ) FILTER (WHERE d.id IS NOT NULL) AS deliveries
+      FROM routes r
+      LEFT JOIN deliveries d ON d.route_id = r.id
+      WHERE r.user_id = ${id}
+      GROUP BY r.id, r.route_date, r.status, r.created_at
+      ORDER BY r.route_date DESC
+      LIMIT ${limit}
+    `
+    return reply.send({ routes })
   })
 }
