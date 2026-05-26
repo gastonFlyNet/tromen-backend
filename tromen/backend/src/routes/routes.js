@@ -225,4 +225,20 @@ export default async function routeRoutes(app) {
     `
     return updated
   })
+  // GET /api/routes/pauses/today — pausas de rutas de hoy
+  app.get('/pauses/today', {
+    preHandler: [requireRole('admin', 'supervisor')]
+  }, async () => {
+    return sql`
+      SELECT rp.id, rp.route_id, rp.reason, rp.paused_at, rp.resumed_at,
+             u.name AS authorized_by_name,
+             r.user_id, rep.name AS repartidor
+      FROM route_pauses rp
+      JOIN routes r ON r.id = rp.route_id
+      JOIN users rep ON rep.id = r.user_id
+      LEFT JOIN users u ON u.id = rp.authorized_by
+      WHERE r.route_date = CURRENT_DATE
+      ORDER BY rp.paused_at DESC
+    `
+  })
 } 
