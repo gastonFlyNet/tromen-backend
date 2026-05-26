@@ -70,4 +70,84 @@ export default async function productRoutes(app) {
     await sql`UPDATE products SET active = false WHERE id = ${id}`
     return { success: true }
   })
+  // GET /api/stock — stock actual de todos los productos
+  app.get('/stock', {
+    preHandler: [requireRole('admin', 'supervisor')]
+  }, async () => {
+    return sql`
+      SELECT p.id, p.name, p.unit, p.price, p.active,
+             COALESCE(p.stock_quantity, 0) AS stock_quantity,
+             COALESCE(SUM(CASE WHEN m.type = 'entrada' THEN m.quantity ELSE 0 END), 0) AS total_entradas,
+             COALESCE(SUM(CASE WHEN m.type = 'salida'  THEN m.quantity ELSE 0 END), 0) AS total_salidas
+      FROM products p
+      LEFT JOIN stock_movements m ON m.product_id = p.id
+      WHERE p.active = true
+      GROUP BY p.id, p.name, p.unit, p.price, p.active, p.stock_quantity
+      ORDER BY p.sort_order ASC, p.name ASC
+    `
+  })
+
+  // POST /api/stock/movement — registrar entrada o salida
+  app.post('/stock/movement', {
+    preHandler: [requireRole('admin', 'supervisor')],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['product_id', 'type', 'quantity'],
+        properties: {
+          product_id: { type: 'string', format: 'uuid' },
+          type:       { type: 'string', enum: ['entrada', 'salida'] },
+          quantity:   { type: 'integer', minimum: 1 },
+          reason:     { type: 'string' },
+          notes:      { type: 'string' },
+        }
+      }
+    }
+  }, async (request, reply) => {
+    const { product_id, type, quantity, reason, notes } = request.body
+
+    // Verificar stock suficiente si es salida
+    if (type === 'salida') {
+      const [product] = await sql`SELECT stock_quantity FROM products WHERE id = ${product_id}`
+      if (!product) return reply.status(404).send({ error: 'Producto no encontrado' })
+      if ((product.stock_quantity ?? 0) < quantity) {
+        return reply.status(400).send({ error: `Stock insuficiente. Disponible: ${product.stock_quantity ?? 0}` })
+      }
+    }
+
+    // Registrar movimiento
+    const [movement] = await sql`
+      INSERT INTO stock_movements (product_id, user_id, type, quantity, reason, notes)
+      VALUES (${product_id}, ${request.user.id}, ${type}, ${quantity}, ${reason ?? null}, ${notes ?? null})
+      RETURNING *
+    `
+
+    // Actualizar stock_quantity en products
+    if (type === 'entrada') {
+      await sql`UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + ${quantity} WHERE id = ${product_id}`
+    } else {
+      await sql`UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) - ${quantity} WHERE id = ${product_id}`
+    }
+
+    return reply.status(201).send(movement)
+  })
+
+  // GET /api/stock/history — historial de movimientos
+  app.get('/stock/history', {
+    preHandler: [requireRole('admin', 'supervisor')]
+  }, async (request) => {
+    const { product_id, limit = 50 } = request.query
+
+    return sql`
+      SELECT m.id, m.type, m.quantity, m.reason, m.notes, m.created_at,
+             p.name AS product_name, p.unit,
+             u.name AS user_name
+      FROM stock_movements m
+      JOIN products p ON p.id = m.product_id
+      JOIN users u ON u.id = m.user_id
+      ${product_id ? sql`WHERE m.product_id = ${product_id}` : sql``}
+      ORDER BY m.created_at DESC
+      LIMIT ${parseInt(limit)}
+    `
+  })
 }
