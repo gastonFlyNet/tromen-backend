@@ -161,7 +161,7 @@ export default async function routeRoutes(app) {
     })
   })
 
-  // POST /api/routes/:id/pause — pausar ruta
+ // POST /api/routes/:id/pause — pausar ruta
   app.post('/:id/pause', {
     preHandler: [app.authenticate]
   }, async (request, reply) => {
@@ -177,6 +177,29 @@ export default async function routeRoutes(app) {
       VALUES (${id}, ${authorized_by}, ${reason ?? null})
       RETURNING *
     `
+    // Notificar a supervisores y admins
+    try {
+      const repartidor = await sql`SELECT name FROM users WHERE id = ${route.user_id}`
+      const repartidorName = repartidor[0]?.name ?? 'Un repartidor'
+      const supervisors = await sql`
+        SELECT push_token FROM users
+        WHERE role IN ('admin', 'supervisor') AND active = true AND push_token IS NOT NULL
+      `
+      for (const sup of supervisors) {
+        await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: sup.push_token,
+            title: 'Ruta pausada',
+            body: `${repartidorName} pauso su ruta${reason ? ': ' + reason : ''}`,
+            data: { type: 'route_paused', route_id: id },
+            sound: 'default',
+            priority: 'high',
+          })
+        }).catch(() => {})
+      }
+    } catch {}
     return reply.status(201).send(pause)
   })
 

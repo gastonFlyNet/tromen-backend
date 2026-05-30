@@ -136,4 +136,14 @@ export default async function userRoutes(app) {
     `
     return reply.send({ routes })
   })
+  // POST /api/users/:id/push-token
+  app.post('/:id/push-token', {
+    preHandler: [app.authenticate]
+  }, async (request, reply) => {
+    const { id } = request.params
+    const { token } = request.body
+    if (!token) return reply.status(400).send({ error: 'Token requerido' })
+    await sql`UPDATE users SET push_token = ${token} WHERE id = ${id}`
+    return { ok: true }
+  })
 }

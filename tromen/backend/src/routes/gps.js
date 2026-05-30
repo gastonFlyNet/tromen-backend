@@ -57,6 +57,26 @@ export default async function gpsRoutes(app) {
           INSERT INTO geofence_events (geofence_id, user_id, route_id, event_type, latitude, longitude)
           VALUES (${geofence.id}, ${request.user.id}, ${route_id ?? null}, 'salida', ${latitude}, ${longitude})
         `
+        // Notificar a supervisores y admins
+        const supervisors = await sql`
+          SELECT push_token, name FROM users
+          WHERE role IN ('admin', 'supervisor') AND active = true AND push_token IS NOT NULL
+        `
+        const userName = request.user.name ?? 'Un repartidor'
+        for (const sup of supervisors) {
+          await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: sup.push_token,
+              title: 'Salida de geocerca',
+              body: `${userName} salio del perimetro de Catriel`,
+              data: { type: 'geofence_exit', user_id: request.user.id },
+              sound: 'default',
+              priority: 'high',
+            })
+          }).catch(() => {})
+        }
       }
     }
 
