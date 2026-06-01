@@ -119,8 +119,8 @@ export default async function routeRoutes(app) {
       for (const c of clients) coordMap[c.id] = { lat: Number(c.latitude), lng: Number(c.longitude) }
       const allHaveCoords = stops.every(s => coordMap[s.client_id])
       if (allHaveCoords) {
-        let currentLat = -37.879
-        let currentLng = -67.799
+        let currentLat = -37.878007
+        let currentLng = -67.790884
         const remaining = [...stops]
         orderedStops = []
         while (remaining.length > 0) {
