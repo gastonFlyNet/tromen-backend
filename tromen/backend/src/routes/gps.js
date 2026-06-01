@@ -81,7 +81,6 @@ export default async function gpsRoutes(app) {
     }
 
     return reply.status(201).send(event)
-    return reply.status(201).send(event)
   })
 
   // POST /api/gps/batch — enviar múltiples puntos (modo offline)
@@ -204,28 +203,7 @@ app.get('/geofence-alerts', {
     LIMIT 20
   `
 })
-// GET /api/gps/tracks-today — tracks de TODOS los repartidores hoy (panel principal)
-  app.get('/tracks-today', {
-    preHandler: [requireRole('admin', 'supervisor')]
-  }, async () => {
-    const rows = await sql`
-      SELECT user_id, latitude, longitude, recorded_at
-      FROM gps_events
-      WHERE recorded_at >= CURRENT_DATE
-        AND recorded_at < CURRENT_DATE + INTERVAL '1 day'
-      ORDER BY recorded_at ASC
-    `
-    const grouped = {}
-    for (const point of rows) {
-      if (!grouped[point.user_id]) grouped[point.user_id] = []
-      grouped[point.user_id].push({
-        lat: point.latitude,
-        lng: point.longitude,
-        timestamp: point.recorded_at
-      })
-    }
-    return { tracks: grouped }
-  })
+
 
   // GET /api/gps/user/:userId/history?date=2025-01-15 — track de fecha específica
   app.get('/user/:userId/history', {
