@@ -148,18 +148,45 @@ export default async function gpsRoutes(app) {
   })
 
   // GET /api/gps/user/:userId/today — track del día de un usuario
-  app.get('/user/:userId/today', {
+app.get('/tracks-today', {
     preHandler: [requireRole('admin', 'supervisor')]
-  }, async (request) => {
-    const { userId } = request.params
-    return sql`
-      SELECT latitude, longitude, speed, heading, recorded_at
+  }, async () => {
+    const rows = await sql`
+      SELECT user_id, latitude, longitude, recorded_at
       FROM gps_events
-      WHERE user_id = ${userId}
-        AND recorded_at >= CURRENT_DATE
+      WHERE recorded_at >= CURRENT_DATE
         AND recorded_at < CURRENT_DATE + INTERVAL '1 day'
       ORDER BY recorded_at ASC
     `
+    // Obtener pausas de hoy
+    const pauses = await sql`
+      SELECT r.user_id, rp.paused_at, rp.resumed_at
+      FROM route_pauses rp
+      JOIN routes r ON r.id = rp.route_id
+      WHERE r.route_date = CURRENT_DATE
+    `
+    const pausesByUser = {}
+    for (const p of pauses) {
+      if (!pausesByUser[p.user_id]) pausesByUser[p.user_id] = []
+      pausesByUser[p.user_id].push({
+        paused_at: new Date(p.paused_at).getTime(),
+        resumed_at: p.resumed_at ? new Date(p.resumed_at).getTime() : Date.now()
+      })
+    }
+    const grouped = {}
+    for (const point of rows) {
+      if (!grouped[point.user_id]) grouped[point.user_id] = []
+      const userPauses = pausesByUser[point.user_id] ?? []
+      const pointTime = new Date(point.recorded_at).getTime()
+      const isPaused = userPauses.some(p => pointTime >= p.paused_at && pointTime <= p.resumed_at)
+      grouped[point.user_id].push({
+        lat: point.latitude,
+        lng: point.longitude,
+        timestamp: point.recorded_at,
+        paused: isPaused
+      })
+    }
+    return { tracks: grouped }
   })
   // GET /api/gps/geofence-alerts — alertas de salida de zona recientes
 app.get('/geofence-alerts', {
