@@ -105,26 +105,60 @@ export default async function routeRoutes(app) {
     }
   }, async (request, reply) => {
     const { user_id, route_date, vehicle_id, notes, stops = [] } = request.body
+
+    // Optimizar orden de paradas por proximidad geografica
+    let orderedStops = [...stops]
+    if (stops.length > 1) {
+      const clientIds = stops.map(s => s.client_id)
+      const clients = await sql`
+        SELECT id, latitude, longitude FROM clients
+        WHERE id = ANY(${clientIds})
+        AND latitude IS NOT NULL AND longitude IS NOT NULL
+      `
+      const coordMap = {}
+      for (const c of clients) coordMap[c.id] = { lat: Number(c.latitude), lng: Number(c.longitude) }
+      const allHaveCoords = stops.every(s => coordMap[s.client_id])
+      if (allHaveCoords) {
+        let currentLat = -37.879
+        let currentLng = -67.799
+        const remaining = [...stops]
+        orderedStops = []
+        while (remaining.length > 0) {
+          let bestIdx = 0
+          let bestDist = Infinity
+          remaining.forEach((stop, i) => {
+            const c = coordMap[stop.client_id]
+            const dist = Math.sqrt(Math.pow(c.lat - currentLat, 2) + Math.pow(c.lng - currentLng, 2))
+            if (dist < bestDist) { bestDist = dist; bestIdx = i }
+          })
+          const next = remaining.splice(bestIdx, 1)[0]
+          orderedStops.push(next)
+          currentLat = coordMap[next.client_id].lat
+          currentLng = coordMap[next.client_id].lng
+        }
+      }
+    }
+
     const [route] = await sql`
       INSERT INTO routes (user_id, route_date, vehicle_id, notes, total_stops, total_amount)
       VALUES (
         ${user_id}, ${route_date}, ${vehicle_id ?? null}, ${notes ?? null},
-        ${stops.length},
-        ${stops.reduce((sum, s) => sum + (s.expected_amount ?? 0), 0)}
+        ${orderedStops.length},
+        ${orderedStops.reduce((sum, s) => sum + (s.expected_amount ?? 0), 0)}
       )
       RETURNING *
     `
     if (stops.length > 0) {
-      const deliveryRows = stops.map((s, i) => ({
+      const deliveryRows = orderedStops.map((s, i) => ({
         route_id:        route.id,
         client_id:       s.client_id,
-        stop_order:      s.stop_order ?? i + 1,
+        stop_order:      i + 1,
         expected_amount: s.expected_amount,
         notes:           s.notes ?? null,
       }))
       await sql`INSERT INTO deliveries ${sql(deliveryRows)}`
     }
-    return reply.status(201).send({ ...route, stops_created: stops.length })
+    return reply.status(201).send({ ...route, stops_created: orderedStops.length, optimized: true })
   })
 
   // POST /api/routes/:id/stops — agregar paradas a ruta existente
@@ -141,7 +175,7 @@ export default async function routeRoutes(app) {
       FROM deliveries WHERE route_id = ${id}
     `
     const baseOrder = maxOrder.max_order
-    const deliveryRows = stops.map((s, i) => ({
+    const deliveryRows = orderedStops.map((s, i) => ({
       route_id:        id,
       client_id:       s.client_id,
       stop_order:      s.stop_order ?? baseOrder + i + 1,
