@@ -2,23 +2,21 @@ import sql from '../db/connection.js'
 
 export default async function deudasRoutes(app) {
 
-  // GET /api/deudas — lista de clientes con saldo pendiente
+  // GET /api/deudas — lista de todos los clientes con saldo pendiente
   app.get('/', {
     preHandler: [app.authenticate]
   }, async () => {
     const rows = await sql`
       SELECT
-        d.client_id,
-        c.name,
-        c.address,
-        c.phone,
-        COALESCE(SUM(d.credit_amount), 0) AS total_deuda
-      FROM deliveries d
-      JOIN clients c ON c.id = d.client_id
-      WHERE d.credit_amount > 0
-      GROUP BY d.client_id, c.name, c.address, c.phone
-      HAVING COALESCE(SUM(d.credit_amount), 0) > 0
-      ORDER BY total_deuda DESC
+        id          AS client_id,
+        name,
+        address,
+        phone,
+        balance     AS total_deuda
+      FROM clients
+      WHERE balance > 0
+        AND active = true
+      ORDER BY balance DESC
     `
     return { deudas: rows }
   })
@@ -68,11 +66,18 @@ export default async function deudasRoutes(app) {
     const { clientId } = request.params
     const { monto, metodo = 'efectivo', nota } = request.body
 
-    // Verificar que el cliente existe
-    const [client] = await sql`SELECT id FROM clients WHERE id = ${clientId}`
+    const [client] = await sql`SELECT id, balance FROM clients WHERE id = ${clientId}`
     if (!client) return reply.status(404).send({ error: 'Cliente no encontrado' })
 
-    // Traer entregas con deuda pendiente, de más antigua a más nueva
+    const deudaActual = parseFloat(client.balance)
+    if (deudaActual <= 0) {
+      return reply.status(400).send({ error: 'Este cliente no tiene deuda pendiente' })
+    }
+    if (monto > deudaActual) {
+      return reply.status(400).send({ error: `El monto ($${monto}) supera la deuda total ($${deudaActual.toFixed(2)})` })
+    }
+
+    // Descontar de las entregas más antiguas primero
     const entregas = await sql`
       SELECT id, credit_amount
       FROM deliveries
@@ -81,38 +86,24 @@ export default async function deudasRoutes(app) {
       ORDER BY created_at ASC
     `
 
-    if (entregas.length === 0) {
-      return reply.status(400).send({ error: 'Este cliente no tiene deuda pendiente' })
-    }
-
-    const totalDeuda = entregas.reduce((acc, e) => acc + parseFloat(e.credit_amount), 0)
-    if (monto > totalDeuda) {
-      return reply.status(400).send({ error: `El monto ($${monto}) supera la deuda total ($${totalDeuda.toFixed(2)})` })
-    }
-
-    // Aplicar el pago descontando de las entregas más antiguas primero
     let resto = monto
     for (const entrega of entregas) {
       if (resto <= 0) break
-      const deuda  = parseFloat(entrega.credit_amount)
-      const pagar  = Math.min(deuda, resto)
-      const nuevo  = parseFloat((deuda - pagar).toFixed(2))
-      await sql`
-        UPDATE deliveries
-        SET credit_amount = ${nuevo}
-        WHERE id = ${entrega.id}
-      `
+      const deuda = parseFloat(entrega.credit_amount)
+      const pagar = Math.min(deuda, resto)
+      const nuevo = parseFloat((deuda - pagar).toFixed(2))
+      await sql`UPDATE deliveries SET credit_amount = ${nuevo} WHERE id = ${entrega.id}`
       resto = parseFloat((resto - pagar).toFixed(2))
     }
 
-    // Actualizar el balance del cliente en la tabla clients
+    // Actualizar balance del cliente
     await sql`
       UPDATE clients
       SET balance = GREATEST(0, balance - ${monto})
       WHERE id = ${clientId}
     `
 
-    // Registrar el pago en pagos_cuenta_corriente
+    // Registrar en pagos_cuenta_corriente
     await sql`
       INSERT INTO pagos_cuenta_corriente
         (client_id, monto, metodo, nota, registrado_por)
