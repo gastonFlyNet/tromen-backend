@@ -19,7 +19,7 @@ export default async function authRoutes(app) {
     const { email, password } = request.body
 
     const [user] = await sql`
-      SELECT id, name, email, phone, role, password_hash, avatar_url, active
+      SELECT id, name, email, phone, role, password_hash, avatar_url, active, app_access
       FROM users
       WHERE email = ${email.toLowerCase()}
       LIMIT 1
@@ -38,7 +38,6 @@ export default async function authRoutes(app) {
       return reply.status(401).send({ error: 'Credenciales inválidas' })
     }
 
-    // Actualizar último login
     await sql`UPDATE users SET last_login_at = NOW() WHERE id = ${user.id}`
 
     const token = app.jwt.sign(
@@ -54,12 +53,13 @@ export default async function authRoutes(app) {
     return {
       token,
       user: {
-        id:        user.id,
-        name:      user.name,
-        email:     user.email,
-        phone:     user.phone,
-        role:      user.role,
-        avatarUrl: user.avatar_url,
+        id:         user.id,
+        name:       user.name,
+        email:      user.email,
+        phone:      user.phone,
+        role:       user.role,
+        avatarUrl:  user.avatar_url,
+        app_access: user.app_access ?? true,
       }
     }
   })
@@ -69,7 +69,7 @@ export default async function authRoutes(app) {
     preHandler: [app.authenticate]
   }, async (request) => {
     const [user] = await sql`
-      SELECT id, name, email, phone, role, avatar_url, last_login_at, created_at
+      SELECT id, name, email, phone, role, avatar_url, app_access, last_login_at, created_at
       FROM users
       WHERE id = ${request.user.id}
     `
