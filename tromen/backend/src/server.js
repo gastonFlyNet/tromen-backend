@@ -12,7 +12,9 @@ import deliveryRoutes from './routes/deliveries.js'
 import gpsRoutes from './routes/gps.js'
 import dashboardRoutes from './routes/dashboard.js'
 import deudasRoutes from './routes/deudas.js'
-
+import ventasDepositoRoutes from './routes/ventas-deposito.js'
+// ...
+app.register(ventasDepositoRoutes, { prefix: '/api/ventas-deposito' })
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
