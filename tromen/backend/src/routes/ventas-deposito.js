@@ -156,7 +156,7 @@ export default async function ventasDepositoRoutes(app) {
         AND d.status = 'entregado'
       ORDER BY d.delivered_at DESC
     `
-    const total = ventas.reduce((s: number, v: any) => s + parseFloat(v.actual_amount || 0), 0)
+    const total = ventas.reduce((s, v) => s + parseFloat(v.actual_amount || 0), 0)
     return { ventas, total }
   })
 }
