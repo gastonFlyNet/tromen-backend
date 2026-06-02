@@ -11,21 +11,20 @@ import routeRoutes from './routes/routes.js'
 import deliveryRoutes from './routes/deliveries.js'
 import gpsRoutes from './routes/gps.js'
 import dashboardRoutes from './routes/dashboard.js'
-import productRoutes from './routes/products.js'
-import geofenceRoutes from './routes/geofences.js'
-
+import deudasRoutes from './routes/deudas.js'
 
 const app = Fastify({
-  bodyLimit: 50 * 1024 * 1024, // 50 MB
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
     : true
 })
 
+// ── Plugins ──────────────────────────────────────────────────
 await app.register(cors, {
   origin: process.env.CORS_ORIGIN?.split(',') ?? true,
   credentials: true,
 })
+
 await app.register(jwt, {
   secret: process.env.JWT_SECRET,
 })
@@ -66,8 +65,8 @@ app.register(routeRoutes,    { prefix: '/api/routes' })
 app.register(deliveryRoutes, { prefix: '/api/deliveries' })
 app.register(gpsRoutes,      { prefix: '/api/gps' })
 app.register(dashboardRoutes,{ prefix: '/api/dashboard' })
-app.register(productRoutes,  { prefix: '/api/products' })
-app.register(geofenceRoutes, { prefix: '/api/geofences' })
+app.register(deudasRoutes,   { prefix: '/api/deudas' })
+
 // ── Error handler global ──────────────────────────────────────
 app.setErrorHandler((error, request, reply) => {
   app.log.error(error)
