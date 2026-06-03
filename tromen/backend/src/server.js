@@ -14,6 +14,7 @@ import dashboardRoutes     from './routes/dashboard.js'
 import deudasRoutes        from './routes/deudas.js'
 import ventasDepositoRoutes from './routes/ventas-deposito.js'
 import productRoutes from './routes/products.js'
+import geofenceRoutes from './routes/geofences.js'
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
@@ -69,6 +70,7 @@ app.register(dashboardRoutes,      { prefix: '/api/dashboard' })
 app.register(deudasRoutes,         { prefix: '/api/deudas' })
 app.register(ventasDepositoRoutes, { prefix: '/api/ventas-deposito' })
 app.register(productRoutes, { prefix: '/api/products' })
+app.register(geofenceRoutes, { prefix: '/api/geofences' })
 // Error handler global
 app.setErrorHandler((error, request, reply) => {
   app.log.error(error)
