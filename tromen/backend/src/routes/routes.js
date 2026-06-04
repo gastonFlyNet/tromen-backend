@@ -159,7 +159,7 @@ export default async function routeRoutes(app) {
     `
     let currentOrder = (maxStop?.max_order ?? 0)
 
-    const deliveryRows = stopsArr.map((s: any) => {
+    const deliveryRows = stopsArr.map((s, currentIdx) => {
       currentOrder++
       return {
         route_id:        id,
@@ -172,7 +172,7 @@ export default async function routeRoutes(app) {
 
     const inserted = await sql`INSERT INTO deliveries ${sql(deliveryRows)} RETURNING *`
 
-    const totalAdded = stopsArr.reduce((sum: number, s: any) => sum + (s.expected_amount ?? 0), 0)
+    const totalAdded = stopsArr.reduce((sum, s) => sum + (s.expected_amount ?? 0), 0)
     await sql`
       UPDATE routes SET
         total_stops  = total_stops + ${stopsArr.length},
