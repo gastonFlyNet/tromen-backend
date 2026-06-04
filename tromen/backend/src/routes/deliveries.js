@@ -212,6 +212,14 @@ export default async function deliveryRoutes(app) {
       await sql`UPDATE clients SET balance = balance + ${body.credit_amount} WHERE id = ${delivery.client_id}`
     }
 
+    // Guardar teléfono en el cliente si lo puso el repartidor y el cliente no tenía
+    if (body.client_phone && delivery.client_id) {
+      await sql`
+        UPDATE clients SET phone = ${body.client_phone}
+        WHERE id = ${delivery.client_id} AND (phone IS NULL OR phone = '')
+      `
+    }
+
     if (body.status === 'entregado' && body.actual_amount > 0) {
       await sql`
         INSERT INTO payments (delivery_id, client_id, method, amount)
@@ -266,7 +274,7 @@ export default async function deliveryRoutes(app) {
     preHandler: [app.authenticate]
   }, async (request, reply) => {
     const { id } = request.params
-    const { latitude, longitude } = request.body ?? {}
+    const { latitude, longitude, phone } = request.body ?? {}
 
     const [updated] = await sql`
       UPDATE deliveries
@@ -274,9 +282,26 @@ export default async function deliveryRoutes(app) {
           delivery_latitude  = ${latitude ?? null},
           delivery_longitude = ${longitude ?? null}
       WHERE id = ${id}
-      RETURNING id, arrived_at, delivery_latitude, delivery_longitude
+      RETURNING id, arrived_at, delivery_latitude, delivery_longitude, client_id
     `
     if (!updated) return reply.status(404).send({ error: 'Entrega no encontrada' })
+
+    // Si el cliente no tiene coordenadas ni teléfono, guardar los del repartidor
+    if (updated.client_id && latitude && longitude) {
+      const [client] = await sql`
+        SELECT latitude, longitude, phone FROM clients WHERE id = ${updated.client_id}
+      `
+      if (client && !client.latitude && !client.longitude && !client.phone) {
+        await sql`
+          UPDATE clients
+          SET latitude  = ${latitude},
+              longitude = ${longitude},
+              phone     = ${phone ?? null}
+          WHERE id = ${updated.client_id}
+        `
+      }
+    }
+
     return updated
   })
 }
