@@ -8,7 +8,10 @@ export default async function deliveryRoutes(app) {
     preHandler: [app.authenticate]
   }, async (request, reply) => {
     const {
-      client_name, client_phone, client_id,
+  client_name: _client_name, client_phone, client_id,
+  client_reference,
+} = request.body
+const client_name = _client_name ?? client_reference ?? null
       items = [], total_amount, payment_method,
       cash_received = 0, transfer_amount = 0, credit_amount = 0,
       notes,
