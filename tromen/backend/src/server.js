@@ -84,7 +84,7 @@ app.get('/test-sms', async (request, reply) => {
   const { sendSMSEntrega } = await import('./services/sms.js')
   const result = await sendSMSEntrega({
     clientName: 'Test Cliente',
-    phone: '+5492996730284',
+    phone: '+542996730284',
     items: [{ name: 'Bidon TROMEN 20L', qty: 2, price: 6000 }],
     total: 12000,
     method: 'efectivo',
