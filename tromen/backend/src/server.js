@@ -15,6 +15,7 @@ import deudasRoutes        from './routes/deudas.js'
 import ventasDepositoRoutes from './routes/ventas-deposito.js'
 import productRoutes from './routes/products.js'
 import geofenceRoutes from './routes/geofences.js'
+import gpsSimulateRoutes from './routes/gps-simulate.js'
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
@@ -71,6 +72,7 @@ app.register(deudasRoutes,         { prefix: '/api/deudas' })
 app.register(ventasDepositoRoutes, { prefix: '/api/ventas-deposito' })
 app.register(productRoutes, { prefix: '/api/products' })
 app.register(geofenceRoutes, { prefix: '/api/geofences' })
+app.register(gpsSimulateRoutes, { prefix: '/api/gps' })
 // Error handler global
 app.setErrorHandler((error, request, reply) => {
   app.log.error(error)
