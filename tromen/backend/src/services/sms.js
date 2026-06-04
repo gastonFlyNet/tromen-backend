@@ -7,18 +7,19 @@ const client = twilio(
 
 const FROM = process.env.TWILIO_PHONE_NUMBER
 
-// Formatear número argentino al formato internacional
 function formatPhone(phone) {
   if (!phone) return null
   const clean = phone.replace(/\D/g, '')
-  // Si empieza con 0, sacarlo
-  const sin0 = clean.startsWith('0') ? clean.slice(1) : clean
-  // Si tiene 10 dígitos, agregar +54
-  if (sin0.length === 10) return `+54${sin0}`
-  // Si ya tiene código de país
-  if (clean.startsWith('54')) return `+${clean}`
-  if (clean.startsWith('+')) return phone
-  return `+54${sin0}`
+  // Ya tiene código de país completo
+  if (clean.startsWith('549') && clean.length === 13) return `+${clean}`
+  if (clean.startsWith('54') && clean.length === 12) return `+${clean}`
+  // Número argentino con 9 de celular (11 dígitos)
+  if (clean.startsWith('9') && clean.length === 11) return `+54${clean}`
+  // Número argentino sin 9 (10 dígitos) — agregar 9
+  if (clean.length === 10) return `+549${clean}`
+  // Número con 0 adelante
+  if (clean.startsWith('0') && clean.length === 11) return `+549${clean.slice(1)}`
+  return `+549${clean}`
 }
 
 export async function sendSMSEntrega({ clientName, phone, items, total, method, creditAmount, notes }) {
