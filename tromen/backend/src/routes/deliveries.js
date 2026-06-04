@@ -3,6 +3,121 @@ import { sendSMSEntrega } from '../services/sms.js'
 
 export default async function deliveryRoutes(app) {
 
+  // POST /api/deliveries/street-sale — venta fuera de ruta
+  app.post('/street-sale', {
+    preHandler: [app.authenticate]
+  }, async (request, reply) => {
+    const {
+      client_name, client_phone, client_id,
+      items = [], total_amount, payment_method,
+      cash_received = 0, transfer_amount = 0, credit_amount = 0,
+      notes,
+    } = request.body
+
+    if (!client_name && !client_id) {
+      return reply.status(400).send({ error: 'Nombre o ID de cliente requerido' })
+    }
+
+    // Resolver o crear cliente
+    let resolvedClientId = client_id ?? null
+    if (!resolvedClientId && client_name) {
+      const [found] = await sql`SELECT id FROM clients WHERE name ILIKE ${client_name} LIMIT 1`
+      if (found) {
+        resolvedClientId = found.id
+        if (client_phone) {
+          await sql`UPDATE clients SET phone = ${client_phone} WHERE id = ${resolvedClientId} AND (phone IS NULL OR phone = '')`
+        }
+      } else {
+        const [created] = await sql`
+          INSERT INTO clients (name, address, city, phone, active)
+          VALUES (${client_name}, 'Venta en calle', 'Catriel', ${client_phone ?? null}, true)
+          RETURNING id
+        `
+        resolvedClientId = created.id
+      }
+    }
+
+    // Buscar o crear ruta "calle" del día para este usuario
+    let route
+    const [existingRoute] = await sql`
+      SELECT * FROM routes
+      WHERE user_id = ${request.user.id}
+        AND route_date = CURRENT_DATE
+        AND notes = 'venta_calle'
+      LIMIT 1
+    `
+    if (existingRoute) {
+      route = existingRoute
+    } else {
+      const [newRoute] = await sql`
+        INSERT INTO routes (user_id, route_date, status, notes, total_stops, total_amount)
+        VALUES (${request.user.id}, CURRENT_DATE, 'en_curso', 'venta_calle', 0, 0)
+        RETURNING *
+      `
+      route = newRoute
+    }
+
+    // Registrar la entrega
+    const [delivery] = await sql`
+      INSERT INTO deliveries (
+        route_id, client_id, stop_order, status,
+        actual_amount, payment_method,
+        cash_received, transfer_amount, credit_amount,
+        notes, delivered_at
+      ) VALUES (
+        ${route.id}, ${resolvedClientId},
+        (SELECT COALESCE(MAX(stop_order), 0) + 1 FROM deliveries WHERE route_id = ${route.id}),
+        'entregado',
+        ${total_amount ?? 0}, ${payment_method ?? 'efectivo'},
+        ${cash_received}, ${transfer_amount}, ${credit_amount},
+        ${notes ?? 'Venta fuera de ruta'},
+        NOW()
+      )
+      RETURNING *
+    `
+
+    // Si hay deuda, actualizar balance del cliente
+    if (credit_amount > 0 && resolvedClientId) {
+      await sql`UPDATE clients SET balance = balance + ${credit_amount} WHERE id = ${resolvedClientId}`
+    }
+
+    // Registrar el pago
+    if (total_amount > 0 && resolvedClientId) {
+      await sql`
+        INSERT INTO payments (delivery_id, client_id, method, amount)
+        VALUES (${delivery.id}, ${resolvedClientId}, ${payment_method ?? 'efectivo'}, ${total_amount})
+      `
+    }
+
+    // Actualizar contadores de la ruta
+    await sql`
+      UPDATE routes SET
+        total_stops      = (SELECT COUNT(*) FROM deliveries WHERE route_id = ${route.id}),
+        completed_stops  = (SELECT COUNT(*) FROM deliveries WHERE route_id = ${route.id} AND status = 'entregado'),
+        collected_amount = (SELECT COALESCE(SUM(actual_amount), 0) FROM deliveries WHERE route_id = ${route.id}),
+        total_amount     = (SELECT COALESCE(SUM(actual_amount), 0) FROM deliveries WHERE route_id = ${route.id})
+      WHERE id = ${route.id}
+    `
+
+    // Enviar SMS si tiene teléfono
+    if (client_phone || resolvedClientId) {
+      const phone = client_phone ?? (await sql`SELECT phone FROM clients WHERE id = ${resolvedClientId}`)[0]?.phone
+      if (phone) {
+        sendSMSEntrega({
+          clientName: client_name,
+          phone,
+          items,
+          total: total_amount ?? 0,
+          method: payment_method,
+          creditAmount: credit_amount,
+          notes: notes ?? null,
+        }).catch(e => console.error('SMS street-sale error:', e))
+      }
+    }
+
+    return reply.status(201).send({ id: delivery.id, ok: true })
+  })
+
   // GET /api/deliveries/:id — detalle de entrega con evidencias
   app.get('/:id', {
     preHandler: [app.authenticate]
@@ -34,7 +149,6 @@ export default async function deliveryRoutes(app) {
   })
 
   // PATCH /api/deliveries/:id — registrar resultado de entrega
-  // Este es el endpoint más importante: lo llama la app móvil
   app.patch('/:id', {
     preHandler: [app.authenticate],
     schema: {
@@ -61,8 +175,9 @@ export default async function deliveryRoutes(app) {
     const body = request.body
 
     const [delivery] = await sql`
-      SELECT d.*, r.user_id FROM deliveries d
+      SELECT d.*, r.user_id, c.phone, c.name AS client_name FROM deliveries d
       JOIN routes r ON r.id = d.route_id
+      JOIN clients c ON c.id = d.client_id
       WHERE d.id = ${id}
     `
     if (!delivery) return reply.status(404).send({ error: 'Entrega no encontrada' })
@@ -91,16 +206,10 @@ export default async function deliveryRoutes(app) {
       UPDATE deliveries SET ${sql(updates)} WHERE id = ${id} RETURNING *
     `
 
-    // Si va a cuenta corriente, actualizar saldo del cliente
     if (body.credit_amount > 0) {
-      await sql`
-        UPDATE clients
-        SET balance = balance + ${body.credit_amount}
-        WHERE id = ${delivery.client_id}
-      `
+      await sql`UPDATE clients SET balance = balance + ${body.credit_amount} WHERE id = ${delivery.client_id}`
     }
 
-    // Registrar el pago
     if (body.status === 'entregado' && body.actual_amount > 0) {
       await sql`
         INSERT INTO payments (delivery_id, client_id, method, amount)
@@ -108,7 +217,6 @@ export default async function deliveryRoutes(app) {
       `
     }
 
-    // Actualizar contadores de la ruta
     await sql`
       UPDATE routes SET
         completed_stops  = (SELECT COUNT(*) FROM deliveries WHERE route_id = ${delivery.route_id} AND status != 'pendiente'),
@@ -116,7 +224,6 @@ export default async function deliveryRoutes(app) {
       WHERE id = ${delivery.route_id}
     `
 
-    // Enviar SMS al cliente si tiene teléfono y la entrega fue exitosa
     if (body.status === 'entregado' && delivery.phone) {
       const items = body.items ?? []
       sendSMSEntrega({
@@ -133,7 +240,7 @@ export default async function deliveryRoutes(app) {
     return updated
   })
 
-  // POST /api/deliveries/:id/evidence — subir evidencia (foto/firma)
+  // POST /api/deliveries/:id/evidence — subir evidencia
   app.post('/:id/evidence', {
     preHandler: [app.authenticate]
   }, async (request, reply) => {
