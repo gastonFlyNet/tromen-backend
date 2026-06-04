@@ -1,4 +1,5 @@
 import sql from '../db/connection.js'
+import { sendSMSEntrega } from '../services/sms.js'
 
 export default async function ventasDepositoRoutes(app) {
 
@@ -127,6 +128,22 @@ export default async function ventasDepositoRoutes(app) {
         total_amount     = (SELECT COALESCE(SUM(actual_amount), 0) FROM deliveries WHERE route_id = ${route.id})
       WHERE id = ${route.id}
     `
+
+    // Enviar SMS si el cliente tiene teléfono
+    if (resolvedClientId) {
+      const [cli] = await sql`SELECT phone FROM clients WHERE id = ${resolvedClientId}`
+      if (cli?.phone) {
+        sendSMSEntrega({
+          clientName: client_name,
+          phone: cli.phone,
+          items: items,
+          total: total_amount,
+          method: payment_method,
+          creditAmount: credit_amount,
+          notes: notes ?? null,
+        }).catch(e => console.error('SMS error:', e))
+      }
+    }
 
     return reply.status(201).send({
       ok: true,

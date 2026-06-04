@@ -1,4 +1,5 @@
 import sql from '../db/connection.js'
+import { sendSMSEntrega } from '../services/sms.js'
 
 export default async function deliveryRoutes(app) {
 
@@ -115,6 +116,20 @@ export default async function deliveryRoutes(app) {
       WHERE id = ${delivery.route_id}
     `
 
+    // Enviar SMS al cliente si tiene teléfono y la entrega fue exitosa
+    if (body.status === 'entregado' && delivery.phone) {
+      const items = body.items ?? []
+      sendSMSEntrega({
+        clientName: delivery.client_name,
+        phone:      delivery.phone,
+        items,
+        total:       body.actual_amount ?? 0,
+        method:      body.payment_method,
+        creditAmount: body.credit_amount ?? 0,
+        notes:       body.notes ?? null,
+      }).catch(e => console.error('SMS error:', e))
+    }
+
     return updated
   })
 
@@ -155,69 +170,4 @@ export default async function deliveryRoutes(app) {
     if (!updated) return reply.status(404).send({ error: 'Entrega no encontrada' })
     return updated
   })
-  // POST /api/deliveries/street-sale — venta fuera de ruta
-app.post('/street-sale', {
-  preHandler: [app.authenticate],
-}, async (request, reply) => {
-  const {
-    bottles_delivered, payment_method, actual_amount,
-    cash_received, transfer_amount, credit_amount,
-    client_reference, notes
-  } = request.body
-
-  // Crear o buscar cliente temporal
-  let clientId
-  const [existingClient] = await sql`
-    SELECT id FROM clients WHERE name = ${'Venta en calle'} LIMIT 1
-  `
-  if (existingClient) {
-    clientId = existingClient.id
-  } else {
-    const [newClient] = await sql`
-      INSERT INTO clients (name, address, zone, active)
-      VALUES ('Venta en calle', 'Catriel', 'Calle', true)
-      RETURNING id
-    `
-    clientId = newClient.id
-  }
-
-  // Buscar ruta del día del repartidor
-  const [route] = await sql`
-    SELECT id FROM routes
-    WHERE user_id = ${request.user.id}
-    AND route_date = CURRENT_DATE
-    LIMIT 1
-  `
-
-  const routeId = route?.id ?? null
-  const stopOrder = routeId ? await sql`
-    SELECT COALESCE(MAX(stop_order), 0) + 1 AS next_order
-    FROM deliveries WHERE route_id = ${routeId}
-  `.then(r => r[0].next_order) : 1
-
-  const [delivery] = await sql`
-    INSERT INTO deliveries (
-      route_id, client_id, stop_order, status,
-      actual_amount, payment_method,
-      cash_received, transfer_amount, credit_amount,
-      notes, delivered_at
-    ) VALUES (
-      ${routeId}, ${clientId}, ${stopOrder}, 'entregado',
-      ${actual_amount ?? 0}, ${payment_method ?? 'efectivo'},
-      ${cash_received ?? 0}, ${transfer_amount ?? 0}, ${credit_amount ?? 0},
-      ${notes ?? null}, NOW()
-    )
-    RETURNING *
-  `
-
-  // Si hay fiado, actualizar saldo del cliente
-  if (credit_amount > 0 && client_reference) {
-    await sql`
-      UPDATE clients SET balance = balance + ${credit_amount}
-      WHERE name = ${client_reference}
-    `
-  }
-
-  return reply.status(201).send(delivery)
-})
 }
