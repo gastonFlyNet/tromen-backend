@@ -8,23 +8,29 @@ export default async function deliveryRoutes(app) {
     preHandler: [app.authenticate]
   }, async (request, reply) => {
     const {
-  client_name: _client_name, client_phone, client_id,
-  client_reference,
-} = request.body
-const client_name = _client_name ?? client_reference ?? null
-      items = [], total_amount, payment_method,
-      cash_received = 0, transfer_amount = 0, credit_amount = 0,
+      client_name,
+      client_reference,
+      client_phone,
+      client_id,
+      items = [],
+      total_amount,
+      payment_method,
+      cash_received = 0,
+      transfer_amount = 0,
+      credit_amount = 0,
       notes,
     } = request.body
 
-    if (!client_name && !client_id) {
+    const nombreCliente = client_name ?? client_reference ?? null
+
+    if (!nombreCliente && !client_id) {
       return reply.status(400).send({ error: 'Nombre o ID de cliente requerido' })
     }
 
     // Resolver o crear cliente
     let resolvedClientId = client_id ?? null
-    if (!resolvedClientId && client_name) {
-      const [found] = await sql`SELECT id FROM clients WHERE name ILIKE ${client_name} LIMIT 1`
+    if (!resolvedClientId && nombreCliente) {
+      const [found] = await sql`SELECT id FROM clients WHERE name ILIKE ${nombreCliente} LIMIT 1`
       if (found) {
         resolvedClientId = found.id
         if (client_phone) {
@@ -33,7 +39,7 @@ const client_name = _client_name ?? client_reference ?? null
       } else {
         const [created] = await sql`
           INSERT INTO clients (name, address, city, phone, active)
-          VALUES (${client_name}, 'Venta en calle', 'Catriel', ${client_phone ?? null}, true)
+          VALUES (${nombreCliente}, 'Venta en calle', 'Catriel', ${client_phone ?? null}, true)
           RETURNING id
         `
         resolvedClientId = created.id
@@ -79,12 +85,10 @@ const client_name = _client_name ?? client_reference ?? null
       RETURNING *
     `
 
-    // Si hay deuda, actualizar balance del cliente
     if (credit_amount > 0 && resolvedClientId) {
       await sql`UPDATE clients SET balance = balance + ${credit_amount} WHERE id = ${resolvedClientId}`
     }
 
-    // Registrar el pago
     if (total_amount > 0 && resolvedClientId) {
       await sql`
         INSERT INTO payments (delivery_id, client_id, method, amount)
@@ -92,7 +96,6 @@ const client_name = _client_name ?? client_reference ?? null
       `
     }
 
-    // Actualizar contadores de la ruta
     await sql`
       UPDATE routes SET
         total_stops      = (SELECT COUNT(*) FROM deliveries WHERE route_id = ${route.id}),
@@ -102,20 +105,16 @@ const client_name = _client_name ?? client_reference ?? null
       WHERE id = ${route.id}
     `
 
-    // Enviar SMS si tiene teléfono
-    if (client_phone || resolvedClientId) {
-      const phone = client_phone ?? (await sql`SELECT phone FROM clients WHERE id = ${resolvedClientId}`)[0]?.phone
-      if (phone) {
-        sendSMSEntrega({
-          clientName: client_name,
-          phone,
-          items,
-          total: total_amount ?? 0,
-          method: payment_method,
-          creditAmount: credit_amount,
-          notes: notes ?? null,
-        }).catch(e => console.error('SMS street-sale error:', e))
-      }
+    if (client_phone) {
+      sendSMSEntrega({
+        clientName: nombreCliente,
+        phone: client_phone,
+        items,
+        total: total_amount ?? 0,
+        method: payment_method,
+        creditAmount: credit_amount,
+        notes: notes ?? null,
+      }).catch(e => console.error('SMS street-sale error:', e))
     }
 
     return reply.status(201).send({ id: delivery.id, ok: true })
