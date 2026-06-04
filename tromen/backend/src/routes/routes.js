@@ -137,46 +137,50 @@ export default async function routeRoutes(app) {
     return reply.status(201).send({ ...route, stops_created: stops.length })
   })
 
-  // POST /api/routes/:id/stops — agregar parada a ruta existente
+  // POST /api/routes/:id/stops — agregar paradas a ruta existente (una o varias)
   app.post('/:id/stops', {
     preHandler: [requireRole('admin', 'supervisor')],
-    schema: {
-      body: {
-        type: 'object',
-        required: ['client_id'],
-        properties: {
-          client_id:       { type: 'string', format: 'uuid' },
-          expected_amount: { type: 'number' },
-          notes:           { type: 'string' },
-        }
-      }
-    }
   }, async (request, reply) => {
     const { id } = request.params
-    const { client_id, expected_amount = 0, notes } = request.body
+    const body = request.body
 
     const [route] = await sql`SELECT * FROM routes WHERE id = ${id}`
     if (!route) return reply.status(404).send({ error: 'Ruta no encontrada' })
 
+    // Aceptar tanto { stops: [...] } como { client_id, expected_amount }
+    const stopsArr = body.stops ?? [body]
+
+    if (!stopsArr.length || !stopsArr[0].client_id) {
+      return reply.status(400).send({ error: 'Se requiere client_id' })
+    }
+
     const [maxStop] = await sql`
       SELECT COALESCE(MAX(stop_order), 0) AS max_order FROM deliveries WHERE route_id = ${id}
     `
-    const stopOrder = (maxStop?.max_order ?? 0) + 1
+    let currentOrder = (maxStop?.max_order ?? 0)
 
-    const [delivery] = await sql`
-      INSERT INTO deliveries (route_id, client_id, stop_order, expected_amount, notes)
-      VALUES (${id}, ${client_id}, ${stopOrder}, ${expected_amount}, ${notes ?? null})
-      RETURNING *
-    `
+    const deliveryRows = stopsArr.map((s: any) => {
+      currentOrder++
+      return {
+        route_id:        id,
+        client_id:       s.client_id,
+        stop_order:      s.stop_order ?? currentOrder,
+        expected_amount: s.expected_amount ?? 0,
+        notes:           s.notes ?? null,
+      }
+    })
 
+    const inserted = await sql`INSERT INTO deliveries ${sql(deliveryRows)} RETURNING *`
+
+    const totalAdded = stopsArr.reduce((sum: number, s: any) => sum + (s.expected_amount ?? 0), 0)
     await sql`
       UPDATE routes SET
-        total_stops  = total_stops + 1,
-        total_amount = total_amount + ${expected_amount}
+        total_stops  = total_stops + ${stopsArr.length},
+        total_amount = total_amount + ${totalAdded}
       WHERE id = ${id}
     `
 
-    return reply.status(201).send(delivery)
+    return reply.status(201).send(inserted)
   })
 
   // PATCH /api/routes/:id/start
