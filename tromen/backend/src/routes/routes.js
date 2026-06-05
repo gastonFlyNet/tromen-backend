@@ -256,4 +256,30 @@ export default async function routeRoutes(app) {
     `
     return { success: true }
   })
+  // POST /api/routes/:id/geofences — asignar geocercas a una ruta
+  app.post('/:id/geofences', {
+    preHandler: [requireRole('admin', 'supervisor')],
+  }, async (request, reply) => {
+    const { id } = request.params
+    const { geofence_ids = [] } = request.body
+
+    if (!geofence_ids.length) return reply.status(400).send({ error: 'geofence_ids requerido' })
+
+    const rows = geofence_ids.map((gid) => ({ route_id: id, geofence_id: gid }))
+    await sql`INSERT INTO route_geofences ${sql(rows)} ON CONFLICT DO NOTHING`
+
+    return reply.status(201).send({ ok: true, asignadas: geofence_ids.length })
+  })
+
+  // GET /api/routes/:id/geofences — geocercas de una ruta
+  app.get('/:id/geofences', {
+    preHandler: [app.authenticate]
+  }, async (request) => {
+    const { id } = request.params
+    return sql`
+      SELECT g.* FROM geofences g
+      JOIN route_geofences rg ON rg.geofence_id = g.id
+      WHERE rg.route_id = ${id}
+    `
+  })
 }
