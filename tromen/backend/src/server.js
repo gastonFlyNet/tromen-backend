@@ -13,6 +13,7 @@ import gpsRoutes from './routes/gps.js'
 import dashboardRoutes from './routes/dashboard.js'
 import ventasDepositoRoutes from './routes/ventas-deposito.js'
 import routeTemplateRoutes from './routes/route-templates.js'
+import productRoutes from './routes/products.js'
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
@@ -65,7 +66,8 @@ app.register(routeRoutes,    { prefix: '/api/routes' })
 app.register(deliveryRoutes, { prefix: '/api/deliveries' })
 app.register(gpsRoutes,      { prefix: '/api/gps' })
 app.register(dashboardRoutes,{ prefix: '/api/dashboard' })
-app.register(ventasDepositoRoutes, { prefix: '/api/products' })
+app.register(productRoutes, { prefix: '/api/products' })
+app.register(ventasDepositoRoutes, { prefix: '/api/ventas-deposito' })
 app.register(routeTemplateRoutes, { prefix: '/api/route-templates' })
 // ── Error handler global ──────────────────────────────────────
 app.setErrorHandler((error, request, reply) => {
