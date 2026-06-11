@@ -4,25 +4,22 @@ import jwt from '@fastify/jwt'
 import multipart from '@fastify/multipart'
 import 'dotenv/config'
 
-import authRoutes          from './routes/auth.js'
-import userRoutes          from './routes/users.js'
-import clientRoutes        from './routes/clients.js'
-import routeRoutes         from './routes/routes.js'
-import deliveryRoutes      from './routes/deliveries.js'
-import gpsRoutes           from './routes/gps.js'
-import dashboardRoutes     from './routes/dashboard.js'
-import deudasRoutes        from './routes/deudas.js'
+import authRoutes from './routes/auth.js'
+import userRoutes from './routes/users.js'
+import clientRoutes from './routes/clients.js'
+import routeRoutes from './routes/routes.js'
+import deliveryRoutes from './routes/deliveries.js'
+import gpsRoutes from './routes/gps.js'
+import dashboardRoutes from './routes/dashboard.js'
 import ventasDepositoRoutes from './routes/ventas-deposito.js'
-import productRoutes from './routes/products.js'
-import geofenceRoutes from './routes/geofences.js'
-import gpsSimulateRoutes from './routes/gps-simulate.js'
+import routeTemplateRoutes from './routes/route-templates.js'
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
     : true
 })
 
-// Plugins
+// ── Plugins ──────────────────────────────────────────────────
 await app.register(cors, {
   origin: process.env.CORS_ORIGIN?.split(',') ?? true,
   credentials: true,
@@ -33,10 +30,10 @@ await app.register(jwt, {
 })
 
 await app.register(multipart, {
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB máx por archivo
 })
 
-// Decorador de auth
+// ── Decorador de auth ─────────────────────────────────────────
 app.decorate('authenticate', async (request, reply) => {
   try {
     await request.jwtVerify()
@@ -52,7 +49,7 @@ app.decorate('requireRole', (roles) => async (request, reply) => {
   }
 })
 
-// Health check
+// ── Health check ──────────────────────────────────────────────
 app.get('/health', async () => ({
   status: 'ok',
   service: 'tromen-api',
@@ -60,20 +57,17 @@ app.get('/health', async () => ({
   timestamp: new Date().toISOString(),
 }))
 
-// Rutas de la API
-app.register(authRoutes,           { prefix: '/api/auth' })
-app.register(userRoutes,           { prefix: '/api/users' })
-app.register(clientRoutes,         { prefix: '/api/clients' })
-app.register(routeRoutes,          { prefix: '/api/routes' })
-app.register(deliveryRoutes,       { prefix: '/api/deliveries' })
-app.register(gpsRoutes,            { prefix: '/api/gps' })
-app.register(dashboardRoutes,      { prefix: '/api/dashboard' })
-app.register(deudasRoutes,         { prefix: '/api/deudas' })
-app.register(ventasDepositoRoutes, { prefix: '/api/ventas-deposito' })
-app.register(productRoutes, { prefix: '/api/products' })
-app.register(geofenceRoutes, { prefix: '/api/geofences' })
-app.register(gpsSimulateRoutes, { prefix: '/api/gps' })
-// Error handler global
+// ── Rutas de la API ───────────────────────────────────────────
+app.register(authRoutes,     { prefix: '/api/auth' })
+app.register(userRoutes,     { prefix: '/api/users' })
+app.register(clientRoutes,   { prefix: '/api/clients' })
+app.register(routeRoutes,    { prefix: '/api/routes' })
+app.register(deliveryRoutes, { prefix: '/api/deliveries' })
+app.register(gpsRoutes,      { prefix: '/api/gps' })
+app.register(dashboardRoutes,{ prefix: '/api/dashboard' })
+app.register(ventasDepositoRoutes, { prefix: '/api/products' })
+app.register(routeTemplateRoutes, { prefix: '/api/route-templates' })
+// ── Error handler global ──────────────────────────────────────
 app.setErrorHandler((error, request, reply) => {
   app.log.error(error)
   const statusCode = error.statusCode ?? 500
@@ -82,32 +76,21 @@ app.setErrorHandler((error, request, reply) => {
     ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
   })
 })
-app.get('/test-sms', async (request, reply) => {
-  const { sendSMSEntrega } = await import('./services/sms.js')
-  const result = await sendSMSEntrega({
-    clientName: 'Test Cliente',
-    phone: '+542996730284',
-    items: [{ name: 'Bidon TROMEN 20L', qty: 2, price: 6000 }],
-    total: 12000,
-    method: 'efectivo',
-    creditAmount: 0,
-    notes: null,
-  })
-  return result
-})
-// Arranque
+
+// ── Arranque ──────────────────────────────────────────────────
 const start = async () => {
   try {
     await app.listen({
       port: parseInt(process.env.PORT ?? '3000'),
       host: process.env.HOST ?? '0.0.0.0',
     })
-    console.log(`\n TROMEN API corriendo en http://localhost:${process.env.PORT ?? 3000}`)
-    console.log(` Health check: http://localhost:${process.env.PORT ?? 3000}/health\n`)
+    console.log(`\n🚀 TROMEN API corriendo en http://localhost:${process.env.PORT ?? 3000}`)
+    console.log(`📋 Health check: http://localhost:${process.env.PORT ?? 3000}/health\n`)
   } catch (err) {
     app.log.error(err)
     process.exit(1)
   }
+  
 }
 
 start()
