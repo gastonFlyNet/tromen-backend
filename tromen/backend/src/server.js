@@ -3,7 +3,6 @@ import cors from '@fastify/cors'
 import jwt from '@fastify/jwt'
 import multipart from '@fastify/multipart'
 import 'dotenv/config'
-
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/users.js'
 import clientRoutes from './routes/clients.js'
@@ -14,26 +13,25 @@ import dashboardRoutes from './routes/dashboard.js'
 import ventasDepositoRoutes from './routes/ventas-deposito.js'
 import routeTemplateRoutes from './routes/route-templates.js'
 import productRoutes from './routes/products.js'
+import geofenceRoutes from './routes/geofences.js'
+import deudasRoutes from './routes/deudas.js'
+import gpsSimulateRoutes from './routes/gps-simulate.js'
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
     : true
 })
-
 // ── Plugins ──────────────────────────────────────────────────
 await app.register(cors, {
   origin: process.env.CORS_ORIGIN?.split(',') ?? true,
   credentials: true,
 })
-
 await app.register(jwt, {
   secret: process.env.JWT_SECRET,
 })
-
 await app.register(multipart, {
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB máx por archivo
 })
-
 // ── Decorador de auth ─────────────────────────────────────────
 app.decorate('authenticate', async (request, reply) => {
   try {
@@ -42,14 +40,12 @@ app.decorate('authenticate', async (request, reply) => {
     reply.status(401).send({ error: 'No autorizado' })
   }
 })
-
 app.decorate('requireRole', (roles) => async (request, reply) => {
   await request.jwtVerify()
   if (!roles.includes(request.user.role)) {
     reply.status(403).send({ error: 'Sin permisos suficientes' })
   }
 })
-
 // ── Health check ──────────────────────────────────────────────
 app.get('/health', async () => ({
   status: 'ok',
@@ -57,7 +53,6 @@ app.get('/health', async () => ({
   version: '1.0.0',
   timestamp: new Date().toISOString(),
 }))
-
 // ── Rutas de la API ───────────────────────────────────────────
 app.register(authRoutes,     { prefix: '/api/auth' })
 app.register(userRoutes,     { prefix: '/api/users' })
@@ -69,6 +64,9 @@ app.register(dashboardRoutes,{ prefix: '/api/dashboard' })
 app.register(productRoutes, { prefix: '/api/products' })
 app.register(ventasDepositoRoutes, { prefix: '/api/ventas-deposito' })
 app.register(routeTemplateRoutes, { prefix: '/api/route-templates' })
+app.register(geofenceRoutes, { prefix: '/api/geofences' })
+app.register(deudasRoutes, { prefix: '/api/deudas' })
+app.register(gpsSimulateRoutes, { prefix: '/api/gps-simulate' })
 // ── Error handler global ──────────────────────────────────────
 app.setErrorHandler((error, request, reply) => {
   app.log.error(error)
@@ -78,7 +76,6 @@ app.setErrorHandler((error, request, reply) => {
     ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
   })
 })
-
 // ── Arranque ──────────────────────────────────────────────────
 const start = async () => {
   try {
@@ -94,5 +91,4 @@ const start = async () => {
   }
   
 }
-
 start()
