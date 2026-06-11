@@ -1,6 +1,17 @@
 import sql from '../db/connection.js'
 import { requireRole } from '../middleware/auth.js'
 
+// Distancia en metros entre dos puntos (fórmula de Haversine)
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 export default async function gpsRoutes(app) {
 
   // POST /api/gps — recibir posición desde la app móvil
@@ -36,47 +47,71 @@ export default async function gpsRoutes(app) {
          ${device_id ?? null}, ${battery_pct ?? null})
       RETURNING id, recorded_at
     `
-    // Verificar geocerca de Catriel
-    const [geofence] = await sql`
-      SELECT id, center_lat, center_lon, radius_meters
-      FROM geofences
-      WHERE name = 'Perimetro Catriel' AND active = true
-      LIMIT 1
-    `
-    if (geofence) {
-      const R = 6371000
-      const dLat = (latitude - geofence.center_lat) * Math.PI / 180
-      const dLon = (longitude - geofence.center_lon) * Math.PI / 180
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(geofence.center_lat * Math.PI / 180) *
-        Math.cos(latitude * Math.PI / 180) *
-        Math.sin(dLon/2) * Math.sin(dLon/2)
-      const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-      if (distance > geofence.radius_meters) {
-        await sql`
-          INSERT INTO geofence_events (geofence_id, user_id, route_id, event_type, latitude, longitude)
-          VALUES (${geofence.id}, ${request.user.id}, ${route_id ?? null}, 'salida', ${latitude}, ${longitude})
+
+    // ── Detección de salida de geocercas de la ruta ──────────────
+    // Solo si hay ruta asociada y la geocerca es de tipo círculo (center + radius).
+    if (route_id) {
+      try {
+        // Geocercas asignadas a esta ruta
+        const geofences = await sql`
+          SELECT g.id, g.name, g.center_lat, g.center_lon, g.radius_meters
+          FROM geofences g
+          JOIN route_geofences rg ON rg.geofence_id = g.id
+          WHERE rg.route_id = ${route_id}
+            AND g.active = true
+            AND g.center_lat IS NOT NULL
+            AND g.center_lon IS NOT NULL
+            AND g.radius_meters IS NOT NULL
         `
-        // Notificar a supervisores y admins
-        const supervisors = await sql`
-          SELECT push_token, name FROM users
-          WHERE role IN ('admin', 'supervisor') AND active = true AND push_token IS NOT NULL
-        `
-        const userName = request.user.name ?? 'Un repartidor'
-        for (const sup of supervisors) {
-          await fetch('https://exp.host/--/api/v2/push/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              to: sup.push_token,
-              title: 'Salida de geocerca',
-              body: `${userName} salio del perimetro de Catriel`,
-              data: { type: 'geofence_exit', user_id: request.user.id },
-              sound: 'default',
-              priority: 'high',
-            })
-          }).catch(() => {})
+
+        for (const gf of geofences) {
+          const distance = distanceMeters(latitude, longitude, gf.center_lat, gf.center_lon)
+          const isOutside = distance > Number(gf.radius_meters)
+          if (!isOutside) continue  // está dentro, no hay nada que hacer
+
+          // Está fuera. ¿Ya avisamos por esta geocerca en los últimos 10 min?
+          const [recentAlert] = await sql`
+            SELECT id FROM geofence_events
+            WHERE geofence_id = ${gf.id}
+              AND user_id = ${request.user.id}
+              AND event_type = 'salida'
+              AND occurred_at >= NOW() - INTERVAL '10 minutes'
+            LIMIT 1
+          `
+          if (recentAlert) continue  // ya avisamos hace poco, no repetir
+
+          // Registrar la salida
+          await sql`
+            INSERT INTO geofence_events (geofence_id, user_id, route_id, event_type, latitude, longitude)
+            VALUES (${gf.id}, ${request.user.id}, ${route_id}, 'salida', ${latitude}, ${longitude})
+          `
+
+          // Notificar a supervisores y admins
+          const supervisors = await sql`
+            SELECT push_token FROM users
+            WHERE role IN ('admin', 'supervisor')
+              AND active = true
+              AND push_token IS NOT NULL
+          `
+          const userName = request.user.name ?? 'Un repartidor'
+          for (const sup of supervisors) {
+            await fetch('https://exp.host/--/api/v2/push/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: sup.push_token,
+                title: 'Salida de zona',
+                body: `${userName} salió de ${gf.name}`,
+                data: { type: 'geofence_exit', user_id: request.user.id, geofence_id: gf.id },
+                sound: 'default',
+                priority: 'high',
+              })
+            }).catch(() => {})
+          }
         }
+      } catch (err) {
+        app.log.error({ err }, 'Error en detección de geocercas')
+        // No frenamos el guardado del punto GPS por un error de detección
       }
     }
 
@@ -84,7 +119,6 @@ export default async function gpsRoutes(app) {
   })
 
   // POST /api/gps/batch — enviar múltiples puntos (modo offline)
-  // Cuando el repartidor recupera conexión manda todos los puntos acumulados
   app.post('/batch', {
     preHandler: [app.authenticate],
     schema: {
@@ -146,8 +180,8 @@ export default async function gpsRoutes(app) {
     `
   })
 
-  // GET /api/gps/user/:userId/today — track del día de un usuario
-app.get('/tracks-today', {
+  // GET /api/gps/tracks-today — tracks del día de todos (admin)
+  app.get('/tracks-today', {
     preHandler: [requireRole('admin', 'supervisor')]
   }, async () => {
     const rows = await sql`
@@ -157,7 +191,6 @@ app.get('/tracks-today', {
         AND recorded_at < CURRENT_DATE + INTERVAL '1 day'
       ORDER BY recorded_at ASC
     `
-    // Obtener pausas de hoy
     const pauses = await sql`
       SELECT r.user_id, rp.paused_at, rp.resumed_at
       FROM route_pauses rp
@@ -187,23 +220,25 @@ app.get('/tracks-today', {
     }
     return { tracks: grouped }
   })
-  // GET /api/gps/geofence-alerts — alertas de salida de zona recientes
-app.get('/geofence-alerts', {
-  preHandler: [requireRole('admin', 'supervisor')]
-}, async () => {
-  return sql`
-    SELECT ge.id, ge.event_type, ge.latitude, ge.longitude, ge.occurred_at,
-           u.name AS repartidor, r.id AS route_id
-    FROM geofence_events ge
-    JOIN users u ON u.id = ge.user_id
-    LEFT JOIN routes r ON r.id = ge.route_id
-    WHERE ge.event_type = 'salida'
-      AND ge.occurred_at >= NOW() - INTERVAL '2 hours'
-    ORDER BY ge.occurred_at DESC
-    LIMIT 20
-  `
-})
 
+  // GET /api/gps/geofence-alerts — alertas de salida de zona recientes
+  app.get('/geofence-alerts', {
+    preHandler: [requireRole('admin', 'supervisor')]
+  }, async () => {
+    return sql`
+      SELECT ge.id, ge.event_type, ge.latitude, ge.longitude, ge.occurred_at,
+             u.name AS repartidor, r.id AS route_id,
+             g.name AS geofence_name
+      FROM geofence_events ge
+      JOIN users u ON u.id = ge.user_id
+      LEFT JOIN routes r ON r.id = ge.route_id
+      LEFT JOIN geofences g ON g.id = ge.geofence_id
+      WHERE ge.event_type = 'salida'
+        AND ge.occurred_at >= NOW() - INTERVAL '12 hours'
+      ORDER BY ge.occurred_at DESC
+      LIMIT 30
+    `
+  })
 
   // GET /api/gps/user/:userId/history?date=2025-01-15 — track de fecha específica
   app.get('/user/:userId/history', {
