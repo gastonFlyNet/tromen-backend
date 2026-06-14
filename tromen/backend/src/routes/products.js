@@ -100,11 +100,13 @@ export default async function productRoutes(app) {
           quantity:   { type: 'integer', minimum: 1 },
           reason:     { type: 'string' },
           notes:      { type: 'string' },
+          destino:        { type: 'string', enum: ['repartidor', 'deposito'] },
+          repartidor_id:  { type: 'string', format: 'uuid' },
         }
       }
     }
   }, async (request, reply) => {
-    const { product_id, type, quantity, reason, notes } = request.body
+    const { product_id, type, quantity, reason, notes, destino, repartidor_id } = request.body
 
     // Verificar stock suficiente si es salida
     if (type === 'salida') {
@@ -117,8 +119,8 @@ export default async function productRoutes(app) {
 
     // Registrar movimiento
     const [movement] = await sql`
-      INSERT INTO stock_movements (product_id, user_id, type, quantity, reason, notes)
-      VALUES (${product_id}, ${request.user.id}, ${type}, ${quantity}, ${reason ?? null}, ${notes ?? null})
+      INSERT INTO stock_movements (product_id, user_id, type, quantity, reason, notes, destino, repartidor_id)
+      VALUES (${product_id}, ${request.user.id}, ${type}, ${quantity}, ${reason ?? null}, ${notes ?? null}, ${type === 'salida' ? (destino ?? null) : null}, ${type === 'salida' ? (repartidor_id ?? null) : null})
       RETURNING *
     `
 
@@ -141,10 +143,13 @@ export default async function productRoutes(app) {
     return sql`
       SELECT m.id, m.type, m.quantity, m.reason, m.notes, m.created_at,
              p.name AS product_name, p.unit,
-             u.name AS user_name
+             u.name AS user_name,
+             m.destino,
+             r.name AS repartidor_name
       FROM stock_movements m
       JOIN products p ON p.id = m.product_id
       JOIN users u ON u.id = m.user_id
+      LEFT JOIN users r ON r.id = m.repartidor_id
       ${product_id ? sql`WHERE m.product_id = ${product_id}` : sql``}
       ORDER BY m.created_at DESC
       LIMIT ${parseInt(limit)}
