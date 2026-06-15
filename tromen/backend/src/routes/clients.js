@@ -40,6 +40,24 @@ export default async function clientRoutes(app) {
     return { ...client, recent_deliveries: deliveries }
   })
 
+  // GET /api/clients/:id/deliveries — historial completo de entregas del cliente
+  app.get('/:id/deliveries', {
+    preHandler: [app.authenticate]
+  }, async (request) => {
+    const { id } = request.params
+    return sql`
+      SELECT d.id, d.status, d.actual_amount, d.credit_amount,
+             d.payment_method, d.delivered_at, d.notes,
+             r.route_date, u.name AS repartidor
+      FROM deliveries d
+      JOIN routes r ON r.id = d.route_id
+      JOIN users u  ON u.id = r.user_id
+      WHERE d.client_id = ${id}
+      ORDER BY d.delivered_at DESC NULLS LAST
+      LIMIT 100
+    `
+  })
+
   // POST /api/clients
   app.post('/', {
     preHandler: [requireRole('admin', 'supervisor')],
