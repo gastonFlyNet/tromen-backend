@@ -105,11 +105,27 @@ export default async function dashboardRoutes(app) {
       SELECT COUNT(*) AS count FROM cash_closings
       WHERE status = 'con_diferencia'
     `
+    // Repartidores actualmente fuera de zona:
+    // cuenta usuarios con un evento de 'salida' reciente que NO tienen
+    // un evento de 'entrada' posterior (o sea, salieron y no volvieron aún).
+    const [outOfZone] = await sql`
+      SELECT COUNT(DISTINCT ge.user_id) AS count
+      FROM geofence_events ge
+      WHERE ge.event_type = 'salida'
+        AND ge.occurred_at >= NOW() - INTERVAL '2 hours'
+        AND NOT EXISTS (
+          SELECT 1 FROM geofence_events ge2
+          WHERE ge2.user_id = ge.user_id
+            AND ge2.event_type = 'entrada'
+            AND ge2.occurred_at > ge.occurred_at
+        )
+    `
 
     return {
       overdue_clients:  parseInt(overdueClients.count),
       stopped_routes:   parseInt(stoppedRoutes.count),
       pending_closings: parseInt(pendingClosings.count),
+      out_of_zone:      parseInt(outOfZone.count),
     }
   })
 }
