@@ -106,11 +106,12 @@ export default async function dashboardRoutes(app) {
       WHERE status = 'con_diferencia'
     `
     // Repartidores actualmente fuera de zona:
-    // cuenta usuarios con un evento de 'salida' reciente que NO tienen
-    // un evento de 'entrada' posterior (o sea, salieron y no volvieron aún).
-    const [outOfZone] = await sql`
-      SELECT COUNT(DISTINCT ge.user_id) AS count
+    // usuarios con un evento de 'salida' reciente que NO tienen un
+    // evento de 'entrada' posterior (salieron y no volvieron aún).
+    const outOfZoneRows = await sql`
+      SELECT DISTINCT u.id, u.name
       FROM geofence_events ge
+      JOIN users u ON u.id = ge.user_id
       WHERE ge.event_type = 'salida'
         AND ge.occurred_at >= NOW() - INTERVAL '2 hours'
         AND NOT EXISTS (
@@ -121,11 +122,23 @@ export default async function dashboardRoutes(app) {
         )
     `
 
+    // Rutas pausadas hoy: el repartidor pausó su ruta y no la retomó.
+    const pausedRows = await sql`
+      SELECT u.id, u.name
+      FROM routes r
+      JOIN users u ON u.id = r.user_id
+      WHERE r.status = 'pausada'
+        AND r.route_date = CURRENT_DATE
+    `
+
     return {
       overdue_clients:  parseInt(overdueClients.count),
       stopped_routes:   parseInt(stoppedRoutes.count),
       pending_closings: parseInt(pendingClosings.count),
-      out_of_zone:      parseInt(outOfZone.count),
+      out_of_zone:      outOfZoneRows.length,
+      out_of_zone_names: outOfZoneRows.map(r => r.name),
+      paused_routes:    pausedRows.length,
+      paused_routes_names: pausedRows.map(r => r.name),
     }
   })
 }
