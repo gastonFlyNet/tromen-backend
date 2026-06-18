@@ -240,6 +240,47 @@ export default async function gpsRoutes(app) {
     `
   })
 
+  // GET /api/gps/day-track/:userId?date=YYYY-MM-DD — recorrido del día con estado por punto
+  app.get('/day-track/:userId', {
+    preHandler: [requireRole('admin', 'supervisor')]
+  }, async (request) => {
+    const { userId } = request.params
+    const date = request.query.date ?? new Date().toISOString().slice(0, 10)
+
+    const rows = await sql`
+      SELECT latitude, longitude, route_id, speed, recorded_at
+      FROM gps_events
+      WHERE user_id = ${userId}
+        AND recorded_at >= ${date}::date
+        AND recorded_at < ${date}::date + INTERVAL '1 day'
+      ORDER BY recorded_at ASC
+    `
+    const pauses = await sql`
+      SELECT rp.paused_at, rp.resumed_at
+      FROM route_pauses rp
+      JOIN routes r ON r.id = rp.route_id
+      WHERE r.user_id = ${userId} AND r.route_date = ${date}::date
+    `
+    const pauseRanges = pauses.map(p => ({
+      from: new Date(p.paused_at).getTime(),
+      to: p.resumed_at ? new Date(p.resumed_at).getTime() : Date.now(),
+    }))
+
+    const points = rows.map(p => {
+      const t = new Date(p.recorded_at).getTime()
+      const enPausa = pauseRanges.some(r => t >= r.from && t <= r.to)
+      let estado = 'sin_ruta'
+      if (p.route_id) estado = enPausa ? 'pausa' : 'con_ruta'
+      return {
+        lat: Number(p.latitude),
+        lng: Number(p.longitude),
+        estado,
+        recorded_at: p.recorded_at,
+      }
+    })
+    return { points }
+  })
+
   // GET /api/gps/user/:userId/history?date=2025-01-15 — track de fecha específica
   app.get('/user/:userId/history', {
     preHandler: [requireRole('admin', 'supervisor')]
