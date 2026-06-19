@@ -11,6 +11,7 @@ import deliveryRoutes from './routes/deliveries.js'
 import gpsRoutes from './routes/gps.js'
 import dashboardRoutes from './routes/dashboard.js'
 import ventasDepositoRoutes from './routes/ventas-deposito.js'
+import bidonesRoutes from './routes/bidones.js'
 import routeTemplateRoutes from './routes/route-templates.js'
 import productRoutes from './routes/products.js'
 import geofenceRoutes from './routes/geofences.js'
@@ -63,6 +64,7 @@ app.register(gpsRoutes,      { prefix: '/api/gps' })
 app.register(dashboardRoutes,{ prefix: '/api/dashboard' })
 app.register(productRoutes, { prefix: '/api/products' })
 app.register(ventasDepositoRoutes, { prefix: '/api/ventas-deposito' })
+app.register(bidonesRoutes, { prefix: '/api/bidones-mal-estado' })
 app.register(routeTemplateRoutes, { prefix: '/api/route-templates' })
 app.register(geofenceRoutes, { prefix: '/api/geofences' })
 app.register(deudasRoutes, { prefix: '/api/deudas' })
