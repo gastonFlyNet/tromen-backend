@@ -90,6 +90,41 @@ export default async function dashboardRoutes(app) {
     return pending
   })
 
+  // GET /api/dashboard/resumen-diario?date=YYYY-MM-DD — datos para el Excel del día
+  app.get('/resumen-diario', {
+    preHandler: [requireRole('admin', 'supervisor')]
+  }, async (request) => {
+    const date = request.query.date ?? new Date().toISOString().slice(0, 10)
+
+    // Todas las ventas entregadas del día (reparto + depósito), con detalle
+    const ventas = await sql`
+      SELECT
+        d.id,
+        d.actual_amount,
+        d.payment_method,
+        d.cash_received,
+        d.transfer_amount,
+        d.credit_amount,
+        d.change_given,
+        d.notes,
+        d.delivered_at,
+        c.name AS cliente,
+        c.address AS direccion,
+        u.name AS repartidor,
+        u.id AS repartidor_id,
+        CASE WHEN r.notes = 'deposito' THEN true ELSE false END AS es_deposito
+      FROM deliveries d
+      JOIN routes r ON r.id = d.route_id
+      JOIN users u ON u.id = r.user_id
+      LEFT JOIN clients c ON c.id = d.client_id
+      WHERE r.route_date = ${date}::date
+        AND d.status = 'entregado'
+      ORDER BY es_deposito ASC, u.name ASC, d.delivered_at ASC
+    `
+
+    return { date, ventas }
+  })
+
   // GET /api/dashboard/alerts — alertas del sistema
   app.get('/alerts', {
     preHandler: [requireRole('admin', 'supervisor')]
