@@ -10,7 +10,7 @@ export default async function clientRoutes(app) {
     const { zone, search, active = 'true' } = request.query
     return sql`
       SELECT id, name, trade_name, address, city, zone, phone,
-             tax_id, credit_limit, balance, latitude, longitude, active
+             tax_id, credit_limit, balance, latitude, longitude, active, remito
       FROM clients
       WHERE active = ${active === 'true'}
       ${zone   ? sql`AND zone = ${zone}`                        : sql``}
@@ -77,6 +77,7 @@ export default async function clientRoutes(app) {
           credit_limit: { type: 'number', minimum: 0 },
           latitude:     { type: 'number' },
           longitude:    { type: 'number' },
+          remito:       { type: 'boolean' },
         }
       }
     }
@@ -95,7 +96,7 @@ export default async function clientRoutes(app) {
   }, async (request, reply) => {
     const { id } = request.params
     const allowed = ['name','trade_name','address','city','zone','phone',
-                     'email','tax_id','credit_limit','balance','latitude','longitude','active','notes']
+                     'email','tax_id','credit_limit','balance','latitude','longitude','active','notes','remito']
     const updates = Object.fromEntries(
       Object.entries(request.body).filter(([k]) => allowed.includes(k))
     )
