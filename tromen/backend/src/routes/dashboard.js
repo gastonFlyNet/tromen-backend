@@ -24,9 +24,16 @@ export default async function dashboardRoutes(app) {
     const byRepartidor = await sql`SELECT * FROM v_daily_summary WHERE route_date = CURRENT_DATE`
     const livePositions = await sql`SELECT * FROM v_last_known_position`
 
+    // Sacar las rutas de depósito: no son repartidores reales, no van en la lista
+    const rutasDeposito = await sql`
+      SELECT id FROM routes WHERE route_date = CURRENT_DATE AND notes = 'deposito'
+    `
+    const idsDeposito = new Set(rutasDeposito.map(r => r.id))
+    const byRepartidorFiltrado = byRepartidor.filter(r => !idsDeposito.has(r.route_id))
+
     return {
       summary,
-      by_repartidor: byRepartidor,
+      by_repartidor: byRepartidorFiltrado,
       live_positions: livePositions,
     }
   })
