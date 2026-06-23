@@ -9,7 +9,7 @@ export default async function userRoutes(app) {
     preHandler: [app.authenticate]
   }, async () => {
     return sql`
-      SELECT id, name, role FROM usersa
+      SELECT id, name, role FROM users
       WHERE role IN ('admin', 'supervisor') AND active = true
       ORDER BY name ASC
     `
