@@ -79,7 +79,21 @@ export default async function routeRoutes(app) {
       WHERE d.route_id = ${id}
       ORDER BY d.stop_order ASC
     `
-    return { ...route, deliveries }
+    // Cuadre de caja: efectivo de entregas + pagos de deuda en efectivo del repartidor ese dia
+    const efectivo_entregas = deliveries
+      .filter(d => d.payment_method === 'efectivo')
+      .reduce((sum, d) => sum + Number(d.actual_amount ?? 0), 0)
+    const [pagosEf] = await sql`
+      SELECT COALESCE(SUM(monto), 0) AS total
+      FROM pagos_cuenta_corriente
+      WHERE metodo = 'efectivo'
+        AND registrado_por = ${route.user_id}
+        AND DATE(created_at) = ${route.route_date}
+    `
+    const efectivo_deudas = Number(pagosEf?.total ?? 0)
+    const efectivo_cobrado = efectivo_entregas + efectivo_deudas
+    const efectivo_esperado = Number(route.cash_start ?? 0) + efectivo_cobrado
+    return { ...route, deliveries, efectivo_entregas, efectivo_deudas, efectivo_cobrado, efectivo_esperado }
   })
 
   // POST /api/routes — crear ruta
@@ -94,6 +108,7 @@ export default async function routeRoutes(app) {
           route_date: { type: 'string', format: 'date' },
           vehicle_id: { type: 'string' },
           notes:      { type: 'string' },
+          cash_start:  { type: 'number' },
           stops: {
             type: 'array',
             items: {
@@ -111,12 +126,12 @@ export default async function routeRoutes(app) {
       }
     }
   }, async (request, reply) => {
-    const { user_id, route_date, vehicle_id, notes, stops = [] } = request.body
+    const { user_id, route_date, vehicle_id, notes, cash_start, stops = [] } = request.body
 
     const [route] = await sql`
-      INSERT INTO routes (user_id, route_date, vehicle_id, notes, total_stops, total_amount)
+      INSERT INTO routes (user_id, route_date, vehicle_id, notes, cash_start, total_stops, total_amount)
       VALUES (
-        ${user_id}, ${route_date}, ${vehicle_id ?? null}, ${notes ?? null},
+        ${user_id}, ${route_date}, ${vehicle_id ?? null}, ${notes ?? null}, ${cash_start ?? 0},
         ${stops.length},
         ${stops.reduce((sum, s) => sum + (s.expected_amount ?? 0), 0)}
       )

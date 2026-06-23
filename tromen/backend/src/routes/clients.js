@@ -60,7 +60,7 @@ export default async function clientRoutes(app) {
 
   // POST /api/clients
   app.post('/', {
-    preHandler: [requireRole('admin', 'supervisor')],
+    preHandler: [requireRole('admin', 'supervisor', 'repartidor')],
     schema: {
       body: {
         type: 'object',
