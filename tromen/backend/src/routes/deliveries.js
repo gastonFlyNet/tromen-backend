@@ -255,17 +255,21 @@ export default async function deliveryRoutes(app) {
     preHandler: [app.authenticate]
   }, async (request, reply) => {
     const { id } = request.params
-    const { type, file_url, latitude, longitude } = request.body
+    const { type, file_url, latitude, longitude, client_uuid = null } = request.body
 
     if (!type || !file_url) {
       return reply.status(400).send({ error: 'type y file_url son requeridos' })
     }
 
     const [evidence] = await sql`
-      INSERT INTO delivery_evidence (delivery_id, type, file_url, latitude, longitude)
-      VALUES (${id}, ${type}, ${file_url}, ${latitude ?? null}, ${longitude ?? null})
+      INSERT INTO delivery_evidence (delivery_id, type, file_url, latitude, longitude, client_uuid)
+      VALUES (${id}, ${type}, ${file_url}, ${latitude ?? null}, ${longitude ?? null}, ${client_uuid})
+      ON CONFLICT (client_uuid) DO NOTHING
       RETURNING *
     `
+    if (!evidence) {
+      return reply.status(200).send({ ok: true, duplicado: true })
+    }
     return reply.status(201).send(evidence)
   })
 
