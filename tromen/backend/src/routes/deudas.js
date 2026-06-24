@@ -67,7 +67,7 @@ export default async function deudasRoutes(app) {
     }
   }, async (request, reply) => {
     const { clientId } = request.params
-    const { monto, metodo = 'efectivo', nota, client_uuid = null } = request.body
+    const { monto, metodo = 'efectivo', nota, client_uuid = null, excedente_accion = 'vuelto' } = request.body
 
     const resultado = await sql.begin(async (sql) => {
       // 1. PORTERO DE IDEMPOTENCIA
@@ -100,9 +100,7 @@ export default async function deudasRoutes(app) {
       if (deudaActual <= 0) {
         return { error: 400, mensaje: 'Este cliente no tiene deuda pendiente' }
       }
-      if (monto > deudaActual) {
-        return { error: 400, mensaje: `El monto ($${monto}) supera la deuda total ($${deudaActual.toFixed(2)})` }
-      }
+      // Permitimos pagar de mas: el excedente se maneja segun excedente_accion (vuelto/favor)
 
       // 3. Descontar de las entregas mas antiguas primero
       const entregas = await sql`
@@ -123,12 +121,21 @@ export default async function deudasRoutes(app) {
         resto = parseFloat((resto - pagar).toFixed(2))
       }
 
-      // 4. Actualizar balance del cliente
+      // 4. Actualizar balance del cliente (la deuda baja, sin pasar de 0)
+      const excedente = Math.max(0, parseFloat((monto - deudaActual).toFixed(2)))
       await sql`
         UPDATE clients
         SET balance = GREATEST(0, balance - ${monto})
         WHERE id = ${clientId}
       `
+      // Si pago de mas y eligio 'favor', el excedente queda como saldo a favor
+      if (excedente > 0 && excedente_accion === 'favor') {
+        await sql`
+          UPDATE clients
+          SET credit_balance = COALESCE(credit_balance, 0) + ${excedente}
+          WHERE id = ${clientId}
+        `
+      }
 
       // 5. Si NO vino client_uuid (cobro online clasico), recien aca insertamos
       //    el pago. Si vino, ya lo insertamos en el paso 1 (portero).

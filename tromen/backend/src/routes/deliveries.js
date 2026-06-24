@@ -165,6 +165,7 @@ export default async function deliveryRoutes(app) {
           transfer_amount:   { type: 'number', minimum: 0 },
           credit_amount:     { type: 'number', minimum: 0 },
           change_given:      { type: 'number', minimum: 0 },
+          credit_favor:      { type: 'number', minimum: 0 },
           delivery_latitude: { type: 'number' },
           delivery_longitude:{ type: 'number' },
           rejection_reason:  { type: 'string' },
@@ -210,6 +211,10 @@ export default async function deliveryRoutes(app) {
 
     if (body.credit_amount > 0) {
       await sql`UPDATE clients SET balance = balance + ${body.credit_amount} WHERE id = ${delivery.client_id}`
+    }
+    // Excedente que el cliente deja a favor (paga de mas y elige 'a favor')
+    if (body.credit_favor > 0) {
+      await sql`UPDATE clients SET credit_balance = COALESCE(credit_balance, 0) + ${body.credit_favor} WHERE id = ${delivery.client_id}`
     }
 
     // Guardar teléfono en el cliente si lo puso el repartidor y el cliente no tenía
