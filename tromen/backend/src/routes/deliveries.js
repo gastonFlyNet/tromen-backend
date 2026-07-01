@@ -117,6 +117,17 @@ export default async function deliveryRoutes(app) {
       }).catch(e => console.error('SMS street-sale error:', e))
     }
 
+    // Guardar items estructurados (tabla delivery_items)
+    if (Array.isArray(items) && items.length > 0) {
+      for (const it of items) {
+        if (!it || (it.qty ?? 0) <= 0) continue
+        await sql`
+          INSERT INTO delivery_items (delivery_id, product_id, product_name, quantity, unit_price)
+          VALUES (${delivery.id}, ${it.product_id ?? null}, ${it.name ?? 'Producto'}, ${it.qty ?? 0}, ${it.price ?? 0})
+        `
+      }
+    }
+
     return reply.status(201).send({ id: delivery.id, ok: true })
   })
 
@@ -170,6 +181,9 @@ export default async function deliveryRoutes(app) {
           delivery_longitude:{ type: 'number' },
           rejection_reason:  { type: 'string' },
           notes:             { type: 'string' },
+          items:             { type: 'array' },
+          client_phone:      { type: 'string' },
+          credit_favor:      { type: 'number', minimum: 0 },
         }
       }
     }
@@ -238,6 +252,19 @@ export default async function deliveryRoutes(app) {
         collected_amount = (SELECT COALESCE(SUM(actual_amount), 0) FROM deliveries WHERE route_id = ${delivery.route_id})
       WHERE id = ${delivery.route_id}
     `
+
+    // Guardar items estructurados de la entrega (tabla delivery_items)
+    const itemsPatch = body.items ?? []
+    if (Array.isArray(itemsPatch) && itemsPatch.length > 0) {
+      await sql`DELETE FROM delivery_items WHERE delivery_id = ${id}`
+      for (const it of itemsPatch) {
+        if (!it || (it.qty ?? 0) <= 0) continue
+        await sql`
+          INSERT INTO delivery_items (delivery_id, product_id, product_name, quantity, unit_price)
+          VALUES (${id}, ${it.product_id ?? null}, ${it.name ?? 'Producto'}, ${it.qty ?? 0}, ${it.price ?? 0})
+        `
+      }
+    }
 
     if (body.status === 'entregado' && delivery.phone) {
       const items = body.items ?? []
