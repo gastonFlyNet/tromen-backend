@@ -1,6 +1,26 @@
 import sql from '../db/connection.js'
 import { requireRole } from '../middleware/auth.js'
 
+// Parser de productos desde el texto de notes (datos viejos, pre delivery_items)
+function parseProductosDeNotes(notes) {
+  if (!notes) return { entregados: [], devueltos: [] }
+  const partes = notes.split('|').map(p => p.trim())
+  const entregados = []
+  const devueltos = []
+  for (const parte of partes) {
+    const mDev = parte.match(/^(.+?)\s+devueltos:\s*(\d+)$/i)
+    if (mDev) { devueltos.push({ nombre: mDev[1].trim(), cantidad: parseInt(mDev[2]) }); continue }
+    const mEnt = parte.match(/^(.+?):\s*(\d+)$/)
+    if (mEnt) {
+      const nombre = mEnt[1].trim()
+      if (/^(cliente|tel|tel\u00e9fono|remito|nota|notas)$/i.test(nombre)) continue
+      entregados.push({ nombre, cantidad: parseInt(mEnt[2]) })
+      continue
+    }
+  }
+  return { entregados, devueltos }
+}
+
 export default async function dashboardRoutes(app) {
 
   // GET /api/dashboard/today — resumen del día (el endpoint principal del panel web)
@@ -97,7 +117,7 @@ export default async function dashboardRoutes(app) {
     const date = request.query.date ?? new Date().toISOString().slice(0, 10)
 
     // Todas las ventas entregadas del día (reparto + depósito), con detalle
-    const ventas = await sql`
+    const ventasRaw = await sql`
       SELECT
         d.id,
         d.actual_amount,
@@ -122,7 +142,49 @@ export default async function dashboardRoutes(app) {
       ORDER BY es_deposito ASC, u.name ASC, d.delivered_at ASC
     `
 
-    return { date, ventas }
+    // Items estructurados (delivery_items) de las entregas del dia
+    const itemsRows = await sql`
+      SELECT di.delivery_id, di.product_name, di.quantity
+      FROM delivery_items di
+      JOIN deliveries d ON d.id = di.delivery_id
+      JOIN routes r ON r.id = d.route_id
+      WHERE r.route_date = ${date}::date
+    `
+    const itemsPorEntrega = {}
+    for (const it of itemsRows) {
+      if (!itemsPorEntrega[it.delivery_id]) itemsPorEntrega[it.delivery_id] = []
+      itemsPorEntrega[it.delivery_id].push({ nombre: it.product_name, cantidad: Number(it.quantity) })
+    }
+
+    // Por cada venta: productos entregados y devueltos (estructurado o parseado)
+    const ventas = ventasRaw.map(v => {
+      let entregados = []
+      let devueltos = []
+      if (itemsPorEntrega[v.id] && itemsPorEntrega[v.id].length > 0) {
+        entregados = itemsPorEntrega[v.id]
+        devueltos = parseProductosDeNotes(v.notes).devueltos
+      } else {
+        const p = parseProductosDeNotes(v.notes)
+        entregados = p.entregados
+        devueltos = p.devueltos
+      }
+      return { ...v, productos: entregados, devueltos }
+    })
+
+    // Cambios por bidon en mal estado del dia
+    const cambiosBidon = await sql`
+      SELECT bme.cantidad, bme.notes, bme.created_at,
+             p.name AS producto, c.name AS cliente, u.name AS repartidor
+      FROM bidones_mal_estado bme
+      LEFT JOIN products p ON p.id = bme.product_id
+      LEFT JOIN clients c ON c.id = bme.client_id
+      LEFT JOIN users u ON u.id = bme.repartidor_id
+      WHERE bme.created_at >= ${date}::date
+        AND bme.created_at < ${date}::date + INTERVAL '1 day'
+      ORDER BY bme.created_at ASC
+    `
+
+    return { date, ventas, cambios_bidon: cambiosBidon }
   })
 
   // GET /api/dashboard/alerts — alertas del sistema
