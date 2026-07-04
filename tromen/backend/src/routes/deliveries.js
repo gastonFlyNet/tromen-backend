@@ -19,6 +19,8 @@ export default async function deliveryRoutes(app) {
       transfer_amount = 0,
       credit_amount = 0,
       notes,
+      delivery_latitude = null,
+      delivery_longitude = null,
     } = request.body
 
     const nombreCliente = client_name ?? client_reference ?? null
@@ -72,6 +74,7 @@ export default async function deliveryRoutes(app) {
         route_id, client_id, stop_order, status,
         actual_amount, payment_method,
         cash_received, transfer_amount, credit_amount,
+        delivery_latitude, delivery_longitude,
         notes, delivered_at
       ) VALUES (
         ${route.id}, ${resolvedClientId},
@@ -79,6 +82,7 @@ export default async function deliveryRoutes(app) {
         'entregado',
         ${total_amount ?? 0}, ${payment_method ?? 'efectivo'},
         ${cash_received}, ${transfer_amount}, ${credit_amount},
+        ${delivery_latitude}, ${delivery_longitude},
         ${notes ?? 'Venta fuera de ruta'},
         NOW()
       )
