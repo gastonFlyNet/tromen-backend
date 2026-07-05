@@ -245,4 +245,63 @@ export default async function dashboardRoutes(app) {
       paused_routes_names: pausedRows.map(r => r.name),
     }
   })
+
+  // GET /api/dashboard/ventas-geo?date=YYYY-MM-DD&user_id=... â€” gestiones georreferenciadas
+  // Fuente unica para los marcadores de venta en todos los mapas del panel.
+  app.get('/ventas-geo', {
+    preHandler: [requireRole('admin', 'supervisor')]
+  }, async (request) => {
+    const date = request.query.date ?? new Date().toISOString().slice(0, 10)
+    const userId = request.query.user_id ?? null
+
+    const ventas = await sql`
+      SELECT
+        d.id,
+        d.delivery_latitude  AS latitude,
+        d.delivery_longitude AS longitude,
+        d.actual_amount      AS monto,
+        d.delivered_at,
+        d.status,
+        d.notes,
+        c.name AS cliente,
+        u.name AS repartidor,
+        u.id   AS repartidor_id,
+        CASE
+          WHEN r.notes = 'venta_calle' THEN 'calle'
+          WHEN d.status = 'no_entregado' THEN 'ausente'
+          ELSE 'normal'
+        END AS tipo
+      FROM deliveries d
+      JOIN routes r ON r.id = d.route_id
+      JOIN users u  ON u.id = r.user_id
+      LEFT JOIN clients c ON c.id = d.client_id
+      WHERE r.route_date = ${date}::date
+        AND d.delivery_latitude IS NOT NULL
+        AND d.delivery_longitude IS NOT NULL
+        ${userId ? sql`AND u.id = ${userId}` : sql``}
+      ORDER BY d.delivered_at ASC
+    `
+
+    // Productos por gestion (para el popup): de delivery_items o parseado de notes
+    const ids = ventas.map(v => v.id)
+    let itemsPorEntrega = {}
+    if (ids.length > 0) {
+      const itemsRows = await sql`
+        SELECT delivery_id, product_name, quantity
+        FROM delivery_items
+        WHERE delivery_id = ANY(${ids})
+      `
+      for (const it of itemsRows) {
+        if (!itemsPorEntrega[it.delivery_id]) itemsPorEntrega[it.delivery_id] = []
+        itemsPorEntrega[it.delivery_id].push({ nombre: it.product_name, cantidad: Number(it.quantity) })
+      }
+    }
+
+    const result = ventas.map(v => ({
+      ...v,
+      productos: itemsPorEntrega[v.id] ?? parseProductosDeNotes(v.notes).entregados,
+    }))
+
+    return { date, ventas: result }
+  })
 }
