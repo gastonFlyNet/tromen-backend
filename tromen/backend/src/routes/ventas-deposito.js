@@ -102,6 +102,22 @@ export default async function ventasDepositoRoutes(app) {
       RETURNING *
     `
 
+    // 3.5. Persistir los productos de la venta en delivery_items (estructurado).
+    //      El frontend manda items: [{ product_id, name, qty, price }].
+    for (const it of items) {
+      const qty = Math.round(Number(it.qty ?? 0))
+      if (qty <= 0) continue
+      await sql`
+        INSERT INTO delivery_items (delivery_id, product_id, product_name, quantity, unit_price)
+        VALUES (
+          ${delivery.id},
+          ${it.product_id ?? null},
+          ${it.name ?? 'Producto'},
+          ${qty},
+          ${Number(it.price ?? 0)}
+        )
+      `
+    }
     // 4. Si hay deuda, actualizar balance del cliente
     if (credit_amount > 0 && resolvedClientId) {
       await sql`
