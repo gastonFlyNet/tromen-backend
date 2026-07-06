@@ -162,7 +162,154 @@ export default async function deliveryRoutes(app) {
       SELECT id, method, amount, reference, status, created_at
       FROM payments WHERE delivery_id = ${id}
     `
-    return { ...delivery, evidence, payments }
+    // Historial de correcciones administrativas (editor del panel)
+    const historial = await sql`
+      SELECT de.id, de.changes, de.edited_at, u.name AS editado_por
+      FROM delivery_edits de
+      JOIN users u ON u.id = de.edited_by
+      WHERE de.delivery_id = ${id}
+      ORDER BY de.edited_at DESC
+    `
+    return { ...delivery, evidence, payments, historial }
+  })
+
+  // PUT /api/deliveries/:id/correccion — edicion administrativa desde el panel.
+  // Aislado del PATCH de los repartidores: solo admin/supervisor, ajusta balance
+  // por DELTA (no suma ciega), registra auditoria, no manda SMS, no toca status.
+  app.put('/:id/correccion', {
+    preHandler: [app.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          client_id:       { type: 'string' },
+          actual_amount:   { type: 'number', minimum: 0 },
+          payment_method:  { type: 'string', enum: ['efectivo','transferencia','cuenta_corriente','mixto'] },
+          cash_received:   { type: 'number', minimum: 0 },
+          transfer_amount: { type: 'number', minimum: 0 },
+          credit_amount:   { type: 'number', minimum: 0 },
+          change_given:    { type: 'number', minimum: 0 },
+          notes:           { type: 'string' },
+          items:           { type: 'array' },
+        }
+      }
+    }
+  }, async (request, reply) => {
+    const { id } = request.params
+    const body = request.body
+
+    if (!['admin', 'supervisor'].includes(request.user.role)) {
+      return reply.status(403).send({ error: 'Solo admin o supervisor pueden corregir gestiones' })
+    }
+
+    const [antes] = await sql`
+      SELECT d.*, di_agg.items AS items_antes
+      FROM deliveries d
+      LEFT JOIN (
+        SELECT delivery_id, json_agg(json_build_object(
+          'product_id', product_id, 'name', product_name,
+          'qty', quantity, 'price', unit_price)) AS items
+        FROM delivery_items WHERE delivery_id = ${id} GROUP BY delivery_id
+      ) di_agg ON di_agg.delivery_id = d.id
+      WHERE d.id = ${id}
+    `
+    if (!antes) return reply.status(404).send({ error: 'Gestion no encontrada' })
+
+    const nuevo = {
+      client_id:       body.client_id       ?? antes.client_id,
+      actual_amount:   body.actual_amount   ?? Number(antes.actual_amount),
+      payment_method:  body.payment_method  ?? antes.payment_method,
+      cash_received:   body.cash_received   ?? Number(antes.cash_received),
+      transfer_amount: body.transfer_amount ?? Number(antes.transfer_amount),
+      credit_amount:   body.credit_amount   ?? Number(antes.credit_amount),
+      change_given:    body.change_given    ?? Number(antes.change_given),
+      notes:           body.notes           ?? antes.notes,
+    }
+
+    const result = await sql.begin(async (sql) => {
+      const creditoViejo = Number(antes.credit_amount)
+      const creditoNuevo = Number(nuevo.credit_amount)
+      if (body.client_id && body.client_id !== antes.client_id) {
+        if (creditoViejo > 0)
+          await sql`UPDATE clients SET balance = balance - ${creditoViejo} WHERE id = ${antes.client_id}`
+        if (creditoNuevo > 0)
+          await sql`UPDATE clients SET balance = balance + ${creditoNuevo} WHERE id = ${nuevo.client_id}`
+      } else {
+        const delta = creditoNuevo - creditoViejo
+        if (delta !== 0)
+          await sql`UPDATE clients SET balance = balance + ${delta} WHERE id = ${antes.client_id}`
+      }
+
+      const [updated] = await sql`
+        UPDATE deliveries SET
+          client_id       = ${nuevo.client_id},
+          actual_amount   = ${nuevo.actual_amount},
+          payment_method  = ${nuevo.payment_method},
+          cash_received   = ${nuevo.cash_received},
+          transfer_amount = ${nuevo.transfer_amount},
+          credit_amount   = ${nuevo.credit_amount},
+          change_given    = ${nuevo.change_given},
+          notes           = ${nuevo.notes},
+          updated_at      = now()
+        WHERE id = ${id}
+        RETURNING *
+      `
+
+      if (Array.isArray(body.items)) {
+        await sql`DELETE FROM delivery_items WHERE delivery_id = ${id}`
+        for (const it of body.items) {
+          const qty = Math.round(Number(it.qty ?? 0))
+          if (qty <= 0) continue
+          await sql`
+            INSERT INTO delivery_items (delivery_id, product_id, product_name, quantity, unit_price)
+            VALUES (${id}, ${it.product_id ?? null}, ${it.name ?? 'Producto'}, ${qty}, ${Number(it.price ?? 0)})
+          `
+        }
+      }
+
+      await sql`DELETE FROM payments WHERE delivery_id = ${id}`
+      if (nuevo.actual_amount > 0) {
+        await sql`
+          INSERT INTO payments (delivery_id, client_id, method, amount)
+          VALUES (${id}, ${nuevo.client_id}, ${nuevo.payment_method}, ${nuevo.actual_amount})
+        `
+      }
+
+      if (antes.route_id) {
+        await sql`
+          UPDATE routes SET
+            collected_amount = (SELECT COALESCE(SUM(actual_amount), 0) FROM deliveries WHERE route_id = ${antes.route_id})
+          WHERE id = ${antes.route_id}
+        `
+      }
+
+      const changes = {}
+      const comparar = {
+        client_id: nuevo.client_id, actual_amount: nuevo.actual_amount,
+        payment_method: nuevo.payment_method, cash_received: nuevo.cash_received,
+        transfer_amount: nuevo.transfer_amount, credit_amount: nuevo.credit_amount,
+        change_given: nuevo.change_given, notes: nuevo.notes,
+      }
+      for (const k of Object.keys(comparar)) {
+        if (String(antes[k] ?? '') !== String(comparar[k] ?? '')) {
+          changes[k] = { antes: antes[k], despues: comparar[k] }
+        }
+      }
+      if (Array.isArray(body.items)) {
+        changes.items = { antes: antes.items_antes ?? [], despues: body.items }
+      }
+
+      if (Object.keys(changes).length > 0) {
+        await sql`
+          INSERT INTO delivery_edits (delivery_id, edited_by, changes)
+          VALUES (${id}, ${request.user.id}, ${sql.json(changes)})
+        `
+      }
+
+      return updated
+    })
+
+    return reply.send({ ok: true, delivery: result })
   })
 
   // PATCH /api/deliveries/:id — registrar resultado de entrega
