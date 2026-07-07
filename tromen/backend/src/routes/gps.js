@@ -30,7 +30,7 @@ export default async function gpsRoutes(app) {
           heading:     { type: 'number' },
           device_id:   { type: 'string' },
           battery_pct: { type: 'integer', minimum: 0, maximum: 100 },
-          route_id:    { type: 'string', format: 'uuid' },
+          route_id:    { type: ['string', 'null'], format: 'uuid' },
         }
       }
     }
