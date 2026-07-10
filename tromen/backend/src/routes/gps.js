@@ -137,7 +137,7 @@ export default async function gpsRoutes(app) {
                 longitude:   { type: 'number' },
                 speed:       { type: 'number' },
                 recorded_at: { type: 'string' },
-                route_id:    { type: 'string' },
+                route_id:    { type: ['string', 'null'] },
               }
             }
           }
