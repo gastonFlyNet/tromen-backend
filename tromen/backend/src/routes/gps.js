@@ -156,7 +156,7 @@ export default async function gpsRoutes(app) {
       recorded_at: e.recorded_at,
     }))
 
-    await sql`INSERT INTO gps_events ${sql(rows)}`
+    await sql`INSERT INTO gps_events ${sql(rows)} ON CONFLICT (user_id, recorded_at) DO NOTHING`
     return reply.status(201).send({ inserted: rows.length })
   })
 
