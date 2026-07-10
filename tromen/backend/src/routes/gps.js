@@ -124,9 +124,9 @@ export default async function gpsRoutes(app) {
     schema: {
       body: {
         type: 'object',
-        required: ['events'],
+        required: ['points'],
         properties: {
-          events: {
+          points: {
             type: 'array',
             maxItems: 500,
             items: {
@@ -145,9 +145,9 @@ export default async function gpsRoutes(app) {
       }
     }
   }, async (request, reply) => {
-    const { events } = request.body
+    const { points } = request.body
 
-    const rows = events.map(e => ({
+    const rows = points.map(e => ({
       user_id:     request.user.id,
       route_id:    e.route_id ?? null,
       latitude:    e.latitude,
