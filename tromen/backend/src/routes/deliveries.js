@@ -28,6 +28,11 @@ export default async function deliveryRoutes(app) {
     if (!nombreCliente && !client_id) {
       return reply.status(400).send({ error: 'Nombre o ID de cliente requerido' })
     }
+    // Idempotencia: si esta venta ya se registro (reintento offline), devolverla sin duplicar.
+    if (client_uuid) {
+      const [yaExiste] = await sql`SELECT * FROM deliveries WHERE client_uuid = ${client_uuid} LIMIT 1`
+      if (yaExiste) return reply.send({ ...yaExiste, idempotent: true })
+    }
 
     // Resolver o crear cliente
     let resolvedClientId = client_id ?? null
@@ -75,7 +80,7 @@ export default async function deliveryRoutes(app) {
         actual_amount, payment_method,
         cash_received, transfer_amount, credit_amount,
         delivery_latitude, delivery_longitude,
-        notes, delivered_at
+        notes, delivered_at, client_uuid
       ) VALUES (
         ${route.id}, ${resolvedClientId},
         (SELECT COALESCE(MAX(stop_order), 0) + 1 FROM deliveries WHERE route_id = ${route.id}),
@@ -84,7 +89,7 @@ export default async function deliveryRoutes(app) {
         ${cash_received}, ${transfer_amount}, ${credit_amount},
         ${delivery_latitude}, ${delivery_longitude},
         ${notes ?? 'Venta fuera de ruta'},
-        NOW()
+        NOW(), ${client_uuid}
       )
       RETURNING *
     `
