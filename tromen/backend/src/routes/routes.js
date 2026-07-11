@@ -2,6 +2,28 @@ import sql from '../db/connection.js'
 import { requireRole } from '../middleware/auth.js'
 
 export default async function routeRoutes(app) {
+  // Notifica al repartidor de una ruta que sus paradas cambiaron (push silenciosa -> refresh).
+  async function notificarRutaActualizada(routeId) {
+    try {
+      const [r] = await sql`
+        SELECT u.push_token FROM routes rt
+        JOIN users u ON u.id = rt.user_id
+        WHERE rt.id = ${routeId} AND u.push_token IS NOT NULL
+      `
+      if (r && r.push_token) {
+        await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: r.push_token,
+            data: { type: 'route_updated', route_id: routeId },
+            priority: 'high',
+            _contentAvailable: true,
+          })
+        }).catch(() => {})
+      }
+    } catch (e) { /* no frenar la operacion por un fallo de push */ }
+  }
 
   // GET /api/routes
   app.get('/', {
@@ -195,7 +217,31 @@ export default async function routeRoutes(app) {
       WHERE id = ${id}
     `
 
+    await notificarRutaActualizada(id)
     return reply.status(201).send(inserted)
+  })
+  // DELETE /api/routes/:id/stops/:deliveryId — quitar una parada de la ruta
+  app.delete('/:id/stops/:deliveryId', {
+    preHandler: [requireRole('admin', 'supervisor')],
+  }, async (request, reply) => {
+    const { id, deliveryId } = request.params
+    const [delivery] = await sql`
+      SELECT * FROM deliveries WHERE id = ${deliveryId} AND route_id = ${id}
+    `
+    if (!delivery) return reply.status(404).send({ error: 'Parada no encontrada en esta ruta' })
+    if (delivery.status && delivery.status !== 'pendiente') {
+      return reply.status(400).send({ error: 'No se puede quitar una parada ya gestionada' })
+    }
+    await sql`DELETE FROM delivery_items WHERE delivery_id = ${deliveryId}`
+    await sql`DELETE FROM deliveries WHERE id = ${deliveryId}`
+    await sql`
+      UPDATE routes SET
+        total_stops  = (SELECT COUNT(*) FROM deliveries WHERE route_id = ${id}),
+        total_amount = (SELECT COALESCE(SUM(expected_amount), 0) FROM deliveries WHERE route_id = ${id})
+      WHERE id = ${id}
+    `
+    await notificarRutaActualizada(id)
+    return reply.send({ ok: true, removed: deliveryId })
   })
 
   // PATCH /api/routes/:id/start
