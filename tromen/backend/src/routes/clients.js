@@ -109,6 +109,29 @@ export default async function clientRoutes(app) {
     return client
   })
 
+  // PATCH /api/clients/:id/phone — repartidor completa el telefono si el cliente no tiene
+  app.patch('/:id/phone', {
+    preHandler: [requireRole('admin', 'supervisor', 'repartidor')]
+  }, async (request, reply) => {
+    const { id } = request.params
+    const [client] = await sql`SELECT * FROM clients WHERE id = ${id}`
+    if (!client) return reply.status(404).send({ error: 'Cliente no encontrado' })
+
+    const { phone } = request.body
+    if (!phone || typeof phone !== 'string' || !phone.trim()) {
+      return reply.status(400).send({ error: 'Telefono requerido' })
+    }
+
+    if (client.phone && client.phone.trim()) {
+      return reply.status(409).send({ error: 'El cliente ya tiene telefono registrado' })
+    }
+
+    const [updated] = await sql`
+      UPDATE clients SET phone = ${phone} WHERE id = ${id} RETURNING *
+    `
+    return updated
+  })
+
   // GET /api/clients/balances — saldos de cuenta corriente
   app.get('/report/balances', {
     preHandler: [requireRole('admin', 'supervisor')]
