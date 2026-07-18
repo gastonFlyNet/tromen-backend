@@ -21,6 +21,7 @@ export default async function deliveryRoutes(app) {
       notes,
       delivery_latitude = null,
       delivery_longitude = null,
+      client_uuid = null,
     } = request.body
 
     const nombreCliente = client_name ?? client_reference ?? null
