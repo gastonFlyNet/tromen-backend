@@ -13,6 +13,7 @@ export default async function deliveryRoutes(app) {
       client_phone,
       client_id,
       items = [],
+      actual_amount,
       total_amount,
       payment_method,
       cash_received = 0,
@@ -23,6 +24,8 @@ export default async function deliveryRoutes(app) {
       delivery_longitude = null,
       client_uuid = null,
     } = request.body
+
+    const montoFinal = actual_amount ?? total_amount ?? 0
 
     const nombreCliente = client_name ?? client_reference ?? null
 
@@ -86,7 +89,7 @@ export default async function deliveryRoutes(app) {
         ${route.id}, ${resolvedClientId},
         (SELECT COALESCE(MAX(stop_order), 0) + 1 FROM deliveries WHERE route_id = ${route.id}),
         'entregado',
-        ${total_amount ?? 0}, ${payment_method ?? 'efectivo'},
+        ${montoFinal}, ${payment_method ?? 'efectivo'},
         ${cash_received}, ${transfer_amount}, ${credit_amount},
         ${delivery_latitude}, ${delivery_longitude},
         ${notes ?? 'Venta fuera de ruta'},
@@ -99,10 +102,10 @@ export default async function deliveryRoutes(app) {
       await sql`UPDATE clients SET balance = balance + ${credit_amount} WHERE id = ${resolvedClientId}`
     }
 
-    if (total_amount > 0 && resolvedClientId) {
+    if (montoFinal > 0 && resolvedClientId) {
       await sql`
         INSERT INTO payments (delivery_id, client_id, method, amount)
-        VALUES (${delivery.id}, ${resolvedClientId}, ${payment_method ?? 'efectivo'}, ${total_amount})
+        VALUES (${delivery.id}, ${resolvedClientId}, ${payment_method ?? 'efectivo'}, ${montoFinal})
       `
     }
 
@@ -120,7 +123,7 @@ export default async function deliveryRoutes(app) {
         clientName: nombreCliente,
         phone: client_phone,
         items,
-        total: total_amount ?? 0,
+        total: montoFinal,
         method: payment_method,
         creditAmount: credit_amount,
         notes: notes ?? null,
