@@ -52,7 +52,7 @@ export default async function routeRoutes(app) {
   app.get('/today', {
     preHandler: [app.authenticate]
   }, async (request, reply) => {
-    const [route] = await sql`
+    let [route] = await sql`
       SELECT r.*, u.name AS repartidor
       FROM routes r
       JOIN users u ON u.id = r.user_id
@@ -63,6 +63,22 @@ export default async function routeRoutes(app) {
       ORDER BY r.created_at DESC
       LIMIT 1
     `
+
+    // No hay ruta de reparto: si hizo venta calle hoy, usamos esa ruta como base
+    // para no romper la estructura que espera la app (route.status, route.id, etc.)
+    if (!route) {
+      ;[route] = await sql`
+        SELECT r.*, u.name AS repartidor
+        FROM routes r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.user_id = ${request.user.id}
+          AND r.route_date = CURRENT_DATE
+          AND r.notes IS DISTINCT FROM 'deposito'
+        ORDER BY r.created_at DESC
+        LIMIT 1
+      `
+    }
+
     if (!route) return reply.status(404).send({ error: 'No hay ruta para hoy' })
 
     const deliveries = await sql`
@@ -70,7 +86,12 @@ export default async function routeRoutes(app) {
              c.latitude, c.longitude, c.trade_name
       FROM deliveries d
       JOIN clients c ON c.id = d.client_id
-      WHERE d.route_id = ${route.id}
+      WHERE d.route_id IN (
+        SELECT id FROM routes
+        WHERE user_id = ${request.user.id}
+          AND route_date = CURRENT_DATE
+          AND notes IS DISTINCT FROM 'deposito'
+      )
       ORDER BY d.stop_order ASC
     `
     return { ...route, deliveries }
