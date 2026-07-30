@@ -1,5 +1,18 @@
+import crypto from 'crypto'
 import bcrypt from 'bcrypt'
 import sql from '../db/connection.js'
+
+// Genera un refresh token opaco (random), guarda su hash en la DB, devuelve el token en claro.
+async function crearRefreshToken(user_id, deviceInfo = null) {
+  const raw = crypto.randomBytes(64).toString('hex')          // token en claro (va al cliente)
+  const hash = crypto.createHash('sha256').update(raw).digest('hex')  // hash (va a la DB)
+  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)   // 90 días
+  await sql`
+    INSERT INTO refresh_tokens (user_id, token_hash, expires_at, device_info)
+    VALUES (${user_id}, ${hash}, ${expiresAt}, ${deviceInfo})
+  `
+  return raw
+}
 
 export default async function authRoutes(app) {
 
@@ -47,11 +60,14 @@ export default async function authRoutes(app) {
         role:  user.role,
         name:  user.name,
       },
-      { expiresIn: process.env.JWT_EXPIRES_IN ?? '7d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN ?? '1h' }
     )
+
+    const refresh_token = await crearRefreshToken(user.id, request.headers['user-agent'] ?? null)
 
     return {
       token,
+      refresh_token,
       user: {
         id:         user.id,
         name:       user.name,
@@ -105,5 +121,69 @@ export default async function authRoutes(app) {
     await sql`UPDATE users SET password_hash = ${newHash} WHERE id = ${request.user.id}`
 
     return { message: 'Contraseña actualizada correctamente' }
+  })
+
+  // POST /api/auth/refresh
+  app.post('/refresh', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['refresh_token'],
+        properties: {
+          refresh_token: { type: 'string' },
+        }
+      }
+    }
+  }, async (request, reply) => {
+    const { refresh_token } = request.body
+    const hash = crypto.createHash('sha256').update(refresh_token).digest('hex')
+
+    const [stored] = await sql`
+      SELECT * FROM refresh_tokens WHERE token_hash = ${hash} LIMIT 1
+    `
+
+    if (!stored || stored.revoked || new Date(stored.expires_at) < new Date()) {
+      return reply.status(401).send({ error: 'Refresh token inválido' })
+    }
+
+    const [user] = await sql`
+      SELECT id, email, role, name, active FROM users WHERE id = ${stored.user_id}
+    `
+
+    if (!user || !user.active) {
+      return reply.status(401).send({ error: 'Refresh token inválido' })
+    }
+
+    const token = app.jwt.sign(
+      {
+        id:    user.id,
+        email: user.email,
+        role:  user.role,
+        name:  user.name,
+      },
+      { expiresIn: process.env.JWT_EXPIRES_IN ?? '1h' }
+    )
+
+    return { token }
+  })
+
+  // POST /api/auth/logout
+  app.post('/logout', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['refresh_token'],
+        properties: {
+          refresh_token: { type: 'string' },
+        }
+      }
+    }
+  }, async (request) => {
+    const { refresh_token } = request.body
+    const hash = crypto.createHash('sha256').update(refresh_token).digest('hex')
+
+    await sql`UPDATE refresh_tokens SET revoked = true WHERE token_hash = ${hash}`
+
+    return { ok: true }
   })
 }
