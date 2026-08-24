@@ -27,6 +27,8 @@ export default async function dashboardRoutes(app) {
   app.get('/today', {
     preHandler: [requireRole('admin', 'supervisor')]
   }, async () => {
+    const hoyArg = sql`(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+
     const [summary] = await sql`
       SELECT
         COUNT(*)                                            AS total_routes,
@@ -38,15 +40,15 @@ export default async function dashboardRoutes(app) {
         COALESCE(SUM(collected_amount), 0)                 AS total_collected,
         COALESCE(SUM(total_amount), 0)                     AS total_expected
       FROM routes
-      WHERE route_date = CURRENT_DATE
+      WHERE route_date = ${hoyArg}
     `
 
-    const byRepartidor = await sql`SELECT * FROM v_daily_summary WHERE route_date = CURRENT_DATE`
+    const byRepartidor = await sql`SELECT * FROM v_daily_summary WHERE route_date = ${hoyArg}`
     const livePositions = await sql`SELECT * FROM v_last_known_position`
 
     // Sacar las rutas de depósito: no son repartidores reales, no van en la lista
     const rutasDeposito = await sql`
-      SELECT id FROM routes WHERE route_date = CURRENT_DATE AND notes = 'deposito'
+      SELECT id FROM routes WHERE route_date = ${hoyArg} AND notes = 'deposito'
     `
     const idsDeposito = new Set(rutasDeposito.map(r => r.id))
     const byRepartidorFiltrado = byRepartidor.filter(r => !idsDeposito.has(r.route_id))
