@@ -364,4 +364,42 @@ export default async function routeRoutes(app) {
       WHERE rg.route_id = ${id}
     `
   })
+
+  // DELETE /api/routes/:id — borrar ruta (solo si NO tiene ventas registradas)
+  // Caso de uso: el encargado generó una ruta mal cargada / duplicada y necesita
+  // borrarla. Se bloquea si hay ventas para proteger la contabilidad.
+  app.delete('/:id', {
+    preHandler: [requireRole('admin', 'supervisor')],
+  }, async (request, reply) => {
+    const { id } = request.params
+
+    const [route] = await sql`SELECT * FROM routes WHERE id = ${id}`
+    if (!route) return reply.status(404).send({ error: 'Ruta no encontrada' })
+
+    // Candado contable: no se borra una ruta que ya tiene ventas.
+    const [{ ventas }] = await sql`
+      SELECT COUNT(*)::int AS ventas
+      FROM deliveries
+      WHERE route_id = ${id}
+        AND (status IN ('entregado','parcial','devuelto') OR actual_amount > 0)
+    `
+    if (ventas > 0) {
+      return reply.status(400).send({
+        error: `No se puede borrar: la ruta tiene ${ventas} ventas registradas`
+      })
+    }
+
+    // Borrado en orden de FK, todo dentro de una transacción:
+    // si algo falla, rollback y la ruta no queda a medias.
+    await sql.begin(async (sql) => {
+      await sql`DELETE FROM delivery_evidence WHERE delivery_id IN (SELECT id FROM deliveries WHERE route_id = ${id})`
+      await sql`DELETE FROM delivery_items    WHERE delivery_id IN (SELECT id FROM deliveries WHERE route_id = ${id})`
+      await sql`DELETE FROM route_pauses      WHERE route_id = ${id}`
+      await sql`DELETE FROM route_geofences   WHERE route_id = ${id}`
+      await sql`DELETE FROM deliveries        WHERE route_id = ${id}`
+      await sql`DELETE FROM routes            WHERE id = ${id}`
+    })
+
+    return reply.send({ ok: true, deleted: id })
+  })
 }
