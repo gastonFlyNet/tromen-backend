@@ -20,7 +20,8 @@ import gpsSimulateRoutes from './routes/gps-simulate.js'
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
-    : true
+    : true,
+  bodyLimit: 15 * 1024 * 1024, // 15 MB (fotos de evidencia en base64)
 })
 // ── Plugins ──────────────────────────────────────────────────
 await app.register(cors, {
